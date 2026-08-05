@@ -98,12 +98,25 @@ flowchart TB
 
   Pydantic                            Checks all API data before it
                                       reaches the system
-
-  Next.js                             Provides registration, live
-                                      recognition and reporting screens
   -----------------------------------------------------------------------
 
 ------------------------------------------------------------------------
+
+---
+# Scalability Considerations
+
+| Component | Current Design | Scalability Approach |
+|-----------|----------------|----------------------|
+| **Frontend** | Next.js web application | Can be deployed behind a Content Delivery Network (CDN) or load balancer to efficiently serve multiple concurrent users. |
+| **Backend** | FastAPI service | Stateless API design enables horizontal scaling by running multiple backend instances behind a load balancer. |
+| **Face Recognition** | ArcFace inference | Inference can be accelerated using GPUs or distributed across multiple inference workers to increase throughput. |
+| **Face Detection** | SCRFD | Independent detection tasks can be processed concurrently using multiple worker processes or GPU streams. |
+| **Vector Search** | Chroma vector database | Supports growth to large embedding collections. The architecture also allows migration to distributed vector databases such as Milvus or Pinecone without modifying the recognition pipeline. |
+| **Relational Database** | PostgreSQL | Supports indexing, connection pooling, replication, partitioning, and clustering to accommodate increasing workloads and concurrent users. |
+| **Recognition Pipeline** | Modular processing services | Detection, alignment, embedding generation, and similarity search can be separated into independent microservices and scaled individually based on demand. |
+| **Live Recognition** | WebSocket streaming | Multiple asynchronous backend workers can process concurrent camera streams while maintaining low-latency communication. |
+| **Storage** | Separate metadata and vector storage | Relational data and vector embeddings are stored independently, allowing each storage system to scale according to its own workload characteristics. |
+| **Deployment** | Containerized services | Each component can be deployed independently using Docker containers and orchestrated with Kubernetes or similar platforms for production-scale deployments. |
 
 # Enrollment
 
