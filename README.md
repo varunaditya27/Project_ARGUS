@@ -235,28 +235,11 @@ The project uses publicly available datasets for training and evaluation.
 
 # Proposed Enhancements
 
-The baseline pipeline establishes masked face recognition performance using a pretrained ArcFace model with similarity-based matching against an unmasked enrollment gallery. Building upon this baseline, Project ARGUS proposes the following enhancements to improve recognition performance under facial occlusion.
+The baseline pipeline establishes masked face recognition performance using a pretrained ArcFace model with similarity-based matching against an unmasked enrollment gallery. Building upon this baseline, Project ARGUS proposes the following enhancement to improve recognition performance under facial occlusion.
 
 ---
 
-## 1. Embedding Refinement Network (Proposed)
-
-A lightweight neural network is proposed to bridge the representation gap between masked and unmasked facial embeddings.
-
-Instead of modifying the pretrained face recognition backbone, the network operates directly on the generated embeddings. During training, corresponding masked and unmasked images of the same individual are passed through the embedding model to generate paired feature vectors. The refinement network learns a transformation that maps masked embeddings closer to their corresponding unmasked representations.
-
-During inference, embeddings extracted from masked probe images are first refined by this network before being matched against the enrollment gallery.
-
-**Expected Benefits**
-
-- Preserves the pretrained ArcFace backbone
-- Lightweight and computationally efficient
-- Modular architecture that can be integrated into existing recognition pipelines
-- Potentially improves masked-to-unmasked matching without retraining the entire recognition model
-
----
-
-## 2. Fine-Tuning the Recognition Backbone
+## 1. Fine-Tuning the Recognition Backbone
 
 As a second enhancement, the pretrained ArcFace model will be fine-tuned using a combination of unmasked and synthetically masked facial images.
 
@@ -323,14 +306,14 @@ This measures the degradation caused by facial occlusion.
 
 | Module | Status |
 |----------|--------|
-| Literature Study | ✅ |
-| System Design | ✅ |
-| Dataset Study | ✅ |
-| Architecture Design | ✅ |
-| Baseline Pipeline | 🟡 In Progress |
-| Evaluation Pipeline | 🟡 In Progress |
-| Enhancement Pipeline | ⏳ Planned |
-| Live Demo | ⏳ Planned |
+| Literature Study | Done |
+| System Design | Done |
+| Dataset Study | Done |
+| Architecture Design | Done |
+| Baseline Pipeline | In Progress |
+| Evaluation Pipeline | In Progress |
+| Enhancement Pipeline | Planned |
+| Live Demo | Planned |
 
 ---
 
