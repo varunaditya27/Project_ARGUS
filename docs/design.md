@@ -56,6 +56,7 @@ flowchart TB
     RECOGNIZE --> SCRFD
 
     SCRFD --> ALIGN["Five-point face alignment"]
+    ALIGN --> ARCFACE["PyTorch ArcFace model"]
     ALIGN --> MASK1["MaskTheFace"]
     ALIGN --> MASK2["RWMFD"]
 
