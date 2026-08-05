@@ -56,10 +56,11 @@ flowchart TB
     RECOGNIZE --> SCRFD
 
     SCRFD --> ALIGN["Five-point face alignment"]
-    ALIGN --> ARCFACE["PyTorch ArcFace model"]
+    ALIGN --> MASK1["MaskTheFace"]
+    ALIGN --> MASK2["RWMFD"]
 
-    ENROLL --> MASK["MaskTheFace"]
-    MASK --> ARCFACE
+    MASK1["MaskTheFace"] --> ARCFACE["PyTorch ArcFace model"]
+    MASK2["RWMFD"] --> ARCFACE["PyTorch ArcFace model"]
 
     ARCFACE --> CHROMA["Chroma vector database"]
     ENROLL --> POSTGRESQL["PostgreSQL identity database"]
