@@ -1,0 +1,21 @@
+# masking + embeddings + evaluation (this phase)
+insightface
+numpy
+onnxruntime
+opencv-python
+scipy
+scikit-learn
+dlib
+imutils
+dotmap
+face-recognition
+face-recognition-models
+Pillow
+pytest
+
+# backend (later phase, not wired up yet)
+fastapi
+uvicorn
+pydantic
+sqlalchemy
+torch
