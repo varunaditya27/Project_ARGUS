@@ -219,6 +219,21 @@ Project_ARGUS/
 
 ---
 
+# Backend
+
+The attendance backend (FastAPI + PostgreSQL + ChromaDB) lives in [`backend/`](backend/). It implements the schema in [`docs/db.md`](docs/db.md) exactly, captures attendance in intervals while a session is active, and derives absence when the session is closed.
+
+| Document | Purpose |
+|----------|---------|
+| [`backend/README.md`](backend/README.md) | Running the service, layout, how to plug in the model adapters |
+| [`docs/database_setup.md`](docs/database_setup.md) | Database connections, schema mapping decisions, ChromaDB and R2 setup |
+| [`docs/api_integration.md`](docs/api_integration.md) | HTTP/WebSocket contract for the frontend and recognition clients |
+| [`docs/benchmarks.md`](docs/benchmarks.md) | Measured attendance and vector-search performance at 20 000 students |
+
+The recognition components run on `onnxruntime` against the InsightFace `buffalo_l` pack (SCRFD detection, ArcFace embeddings, geometric mask synthesis, ChromaDB index). Any component without a configured model file answers `503` naming the missing setting; the backend never returns fabricated recognition results.
+
+---
+
 # Datasets
 
 The project uses publicly available datasets for training and evaluation.
@@ -310,9 +325,13 @@ This measures the degradation caused by facial occlusion.
 | System Design | Done |
 | Dataset Study | Done |
 | Architecture Design | Done |
+| Attendance Backend | Done |
+| Model Adapters (SCRFD / ArcFace / mask synthesis) | Done |
 | Baseline Pipeline | In Progress |
 | Evaluation Pipeline | In Progress |
+| Threshold Calibration | Planned |
 | Enhancement Pipeline | Planned |
+| Frontend | Planned |
 | Live Demo | Planned |
 
 ---

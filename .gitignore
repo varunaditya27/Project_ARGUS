@@ -1,0 +1,23 @@
+# Model weights are fetched, not committed. The InsightFace buffalo_l pack is
+# ~197 MB and w600k_r50.onnx alone exceeds GitHub's 100 MB per-file limit.
+# See backend/README.md -> "Recognition status" for the expected layout.
+models/
+*.onnx
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+*.egg-info/
+
+# Local configuration and caches
+.env
+.pytest_cache/
+.ruff_cache/
+.chroma/
+.chroma-bench/
+
+# Editors / OS
+.DS_Store
+Thumbs.db
+.idea/
