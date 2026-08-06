@@ -166,18 +166,20 @@ the request fail with `503 dependency_not_configured` naming these variables -
 
 | Variable | Description |
 |----------|-------------|
-| `ARGUS_OBJECT_STORAGE_MODE` | `disabled` (default) or `r2`. |
+| `ARGUS_OBJECT_STORAGE_MODE` | `disabled` (default), `local` or `r2`. |
+| `ARGUS_STORAGE_KEY_PREFIX` | Key prefix, default `enrollment`. |
+| `ARGUS_LOCAL_STORAGE_PATH` | `local`: directory the images are written to. |
+| `ARGUS_LOCAL_PUBLIC_BASE_URL` | `local`: prefix the stored URLs are built from. |
 | `ARGUS_R2_ENDPOINT_URL` | `https://<account-id>.r2.cloudflarestorage.com`. |
 | `ARGUS_R2_BUCKET` | Bucket holding the enrollment images. |
 | `ARGUS_R2_ACCESS_KEY_ID` | R2 API token access key. |
 | `ARGUS_R2_SECRET_ACCESS_KEY` | R2 API token secret. |
 | `ARGUS_R2_PUBLIC_BASE_URL` | Public base URL of the bucket (custom domain or `r2.dev`); stored URLs are built from it. |
-| `ARGUS_R2_KEY_PREFIX` | Key prefix, default `enrollment`. |
 
 Object keys are deterministic:
 
 ```text
-{ARGUS_R2_KEY_PREFIX}/{student_id}/{sha256-prefix}.{ext}
+{ARGUS_STORAGE_KEY_PREFIX}/{student_id}/{sha256-prefix}.{ext}
 ```
 
 so re-running an import overwrites the same objects instead of littering the

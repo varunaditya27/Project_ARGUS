@@ -24,6 +24,7 @@ from app.services.recognition import RecognitionService
 from app.services.roster_import import RosterImportService
 from app.services.session import SessionService
 from app.services.student import StudentService
+from app.storage.local import LocalObjectStorage
 from app.storage.ports import ObjectStorage
 from app.storage.r2 import R2ObjectStorage
 
@@ -78,10 +79,16 @@ class Container:
 
 
 def build_object_storage(settings: Settings) -> ObjectStorage | None:
-    # Cloudflare R2 when it is configured; otherwise nothing, and the import
-    # endpoint says so rather than half-working.
-    if settings.object_storage_mode != "r2":
+    # R2 or the local filesystem when configured; otherwise nothing, and the
+    # endpoints that need an upload say so rather than half-working.
+    if settings.object_storage_mode == "disabled":
         return None
+    if settings.object_storage_mode == "local":
+        return LocalObjectStorage(
+            root=settings.local_storage_path,
+            public_base_url=settings.local_public_base_url,
+            key_prefix=settings.storage_key_prefix,
+        )
     assert settings.r2_endpoint_url is not None
     assert settings.r2_bucket is not None
     assert settings.r2_access_key_id is not None
@@ -93,7 +100,7 @@ def build_object_storage(settings: Settings) -> ObjectStorage | None:
         access_key_id=settings.r2_access_key_id,
         secret_access_key=settings.r2_secret_access_key,
         public_base_url=settings.r2_public_base_url,
-        key_prefix=settings.r2_key_prefix,
+        key_prefix=settings.storage_key_prefix,
     )
 
 

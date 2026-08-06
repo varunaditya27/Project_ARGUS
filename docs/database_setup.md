@@ -242,22 +242,32 @@ never leave searchable vectors pointing at a deleted identity.
 
 ---
 
-## 7. Cloudflare R2
+## 7. Object storage for enrollment images
 
 | Variable | Values | Notes |
 |---|---|---|
-| `ARGUS_OBJECT_STORAGE_MODE` | `disabled` \| `r2` | `disabled` makes any import that carries images answer 503 rather than invent a URL. |
+| `ARGUS_OBJECT_STORAGE_MODE` | `disabled` \| `local` \| `r2` | `disabled` makes any upload answer 503 rather than invent a URL. |
+| `ARGUS_STORAGE_KEY_PREFIX` | `enrollment` | Object key prefix, both modes. |
+| `ARGUS_LOCAL_STORAGE_PATH` | `./.media` | `local` only: directory the images are written to. |
+| `ARGUS_MEDIA_URL_PATH` | `/media` | `local` only: path the API serves that directory from. |
+| `ARGUS_LOCAL_PUBLIC_BASE_URL` | `http://localhost:8000/media` | `local` only: prefix written into `students.image_url`. |
 | `ARGUS_R2_ENDPOINT_URL` | `https://<account>.r2.cloudflarestorage.com` | Required for `r2`. |
 | `ARGUS_R2_BUCKET` | bucket name | Required for `r2`. |
 | `ARGUS_R2_ACCESS_KEY_ID` / `ARGUS_R2_SECRET_ACCESS_KEY` | credentials | Required for `r2`. |
 | `ARGUS_R2_PUBLIC_BASE_URL` | `https://images.example.edu` | Required for `r2`; the prefix written into `students.image_url`. |
-| `ARGUS_R2_KEY_PREFIX` | `enrollment` | Object key prefix. |
 
-There are two ways an enrollment image gets a URL. `POST /students` takes an
-`image_url` your client has already uploaded, and the backend only validates and
-stores it. `POST /students/import` accepts a ZIP of photographs and uploads each
-one itself before writing the row, because `students.image_url` is `NOT NULL`.
-See `docs/registration_import.md`.
+`local` keeps everything on one machine: the API writes each image under
+`ARGUS_LOCAL_STORAGE_PATH` and mounts that directory at `ARGUS_MEDIA_URL_PATH`,
+so a demo runs without cloud credentials. `r2` is the deployment mode. Keys are
+content-addressed in both, so re-uploading the same photograph overwrites rather
+than accumulating copies.
+
+There are three ways an enrollment image gets a URL. `POST /students/image`
+stores an upload and returns the URL to pass to `POST /students` - this is what
+the frontend's file picker and webcam capture use. `POST /students` also accepts
+an `image_url` your client already hosts. `POST /students/import` uploads each
+photograph in a ZIP itself before writing the row, because `students.image_url`
+is `NOT NULL`. See `docs/registration_import.md`.
 
 Objects are never deleted by the backend. If an import's insert fails after its
 images were uploaded, the orphaned keys are logged at `ERROR` for reconciliation.

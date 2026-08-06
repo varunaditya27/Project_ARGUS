@@ -110,6 +110,7 @@ the two differ, the roster import is incomplete - worth surfacing in the UI.
 | Method | Path | Notes |
 |---|---|---|
 | `POST` | `/students` | `{student_name, roll_no, class_id, image_url}` |
+| `POST` | `/students/image` | multipart `image`; stores it and returns `{key, url}` to use as `image_url`. Needs no database |
 | `POST` | `/students/import` | Bulk roster from a CSV plus an optional ZIP of photographs - see `docs/registration_import.md` |
 | `GET` | `/students` | Filter `class_id`; keyset paging via `after` + `limit` |
 | `GET` | `/students/{student_id}` | |
@@ -122,9 +123,10 @@ the two differ, the roster import is incomplete - worth surfacing in the UI.
 specifies, so alphanumeric roll numbers like `CS2024001` cannot be stored, and
 two classrooms cannot reuse a number.
 
-For a single student, `image_url` must be an absolute HTTP(S) URL you have
-already uploaded. For a bulk import the backend can upload the photographs to
-Cloudflare R2 itself; that is the difference between the two routes.
+`image_url` must be an absolute HTTP(S) URL. Either host the photograph
+yourself, or `POST /students/image` first and pass back the `url` it returns - a
+file picker and a webcam capture both take that route. A bulk import needs
+neither: the backend uploads every photograph in the ZIP itself.
 
 Deleting a student is destructive of their attendance history, because the
 foreign keys carry no `ON DELETE` rule and the row cannot go otherwise. Warn
@@ -347,10 +349,11 @@ paging. Present rows appear progressively while the lecture runs.
 **Closing.** Call `POST /sessions/{id}/close` once, display the report, then
 refresh the register: `present + absent` now equals `roster_count`.
 
-**Enrollment, one student.** Upload the photograph to R2, `POST /students` with
-the URL, then `POST /students/{id}/enroll` with the image. Handle `503` from the
-enroll step when the models or Chroma are not configured - the student row is
-still created and usable.
+**Enrollment, one student.** `POST /students/image` with the file or the webcam
+capture, `POST /students` with the URL it returns, then
+`POST /students/{id}/enroll` with the same bytes. Handle `503` from the enroll
+step when the models or Chroma are not configured - the student row is still
+created and usable. This is what `frontend/src/app/enrollment/page.tsx` does.
 
 **Enrollment, a whole roster.** `POST /students/import` with the CSV and a ZIP of
 photographs; the backend uploads the images and writes the rows. It reports per
@@ -362,3 +365,6 @@ in `docs/registration_import.md`.
 `recognition_ready` is false, hide the live-recognition surface and label the
 attendance views as manual/partial rather than letting operators believe
 recognition is running.
+
+The reference implementation of all of the above is the Next.js console in
+`frontend/`; its README maps each screen to the endpoints it calls.

@@ -7,6 +7,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 
 from app.api.router import api_router
 from app.container import build_container
@@ -62,6 +63,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             allow_credentials=True,
             allow_methods=["*"],
             allow_headers=["*"],
+        )
+
+    if settings.object_storage_mode == "local":
+        # Enrollment images are written to disk, so this process also serves them.
+        settings.local_storage_path.mkdir(parents=True, exist_ok=True)
+        app.mount(
+            settings.media_url_path,
+            StaticFiles(directory=settings.local_storage_path),
+            name="media",
         )
 
     register_exception_handlers(app)

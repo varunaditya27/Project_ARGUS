@@ -15,8 +15,8 @@ class StudentCreate(ApiModel):
     #: INTEGER and globally unique, per docs/db.md.
     roll_no: int = Field(ge=1)
     class_id: uuid.UUID | None = None
-    #: R2 URL of the unmasked enrollment image. Use POST /students/import to have
-    #: the backend upload the image itself.
+    #: URL of the unmasked enrollment image. POST /students/image uploads one and
+    #: returns the URL to put here.
     image_url: HttpUrl
 
 
@@ -27,6 +27,12 @@ class StudentRead(ApiModel):
     class_id: uuid.UUID | None
     image_url: str
     created_at: dt.datetime
+
+
+class UploadedImage(ApiModel):
+    #: Object key, useful when an upload has to be traced or cleaned up.
+    key: str
+    url: str
 
 
 class StudentTemplates(ApiModel):
