@@ -12,14 +12,15 @@ import {
   Building2,
   Clock,
   BarChart3,
+  FileSpreadsheet,
   Settings,
-  LogOut,
   ChevronLeft,
   ChevronRight,
   ScanFace,
 } from "lucide-react";
+import { useQuery } from "@tanstack/react-query";
 import { useSidebarStore } from "@/store/use-sidebar-store";
-import { Avatar } from "@/components/ui/avatar";
+import { recognitionService } from "@/services/recognition";
 import { cn } from "@/lib/utils";
 
 const NAV_ITEMS = [
@@ -28,15 +29,22 @@ const NAV_ITEMS = [
   { label: "Live Recognition", href: "/live-recognition", icon: Video },
   { label: "Attendance", href: "/attendance", icon: CalendarCheck },
   { label: "Students", href: "/students", icon: Users },
+  { label: "Bulk Import", href: "/import", icon: FileSpreadsheet },
   { label: "Classrooms", href: "/classrooms", icon: Building2 },
   { label: "Sessions", href: "/sessions", icon: Clock },
   { label: "Reports", href: "/reports", icon: BarChart3 },
-  { label: "Settings", href: "/settings", icon: Settings },
+  { label: "System", href: "/settings", icon: Settings },
 ];
 
 export function Sidebar() {
   const pathname = usePathname();
   const { isCollapsed, toggleCollapse, isMobileOpen, setMobileOpen } = useSidebarStore();
+  const health = useQuery({
+    queryKey: ["health"],
+    queryFn: () => recognitionService.health(),
+    refetchInterval: 30_000,
+  });
+  const isHealthy = health.data ? health.data.status === "ok" : health.error ? false : null;
 
   return (
     <>
@@ -122,23 +130,28 @@ export function Sidebar() {
           })}
         </nav>
 
-        {/* Profile Footer */}
+        {/* Backend status */}
         <div className="p-3 border-t border-[var(--stone-200)] shrink-0">
           <div className={cn("flex items-center", isCollapsed ? "justify-center" : "gap-2.5")}>
-            <Avatar name="Nidhi Mahesh" size="sm" />
+            <span
+              className={cn(
+                "h-2 w-2 rounded-full shrink-0",
+                isHealthy === null
+                  ? "bg-[var(--stone-300)]"
+                  : isHealthy
+                    ? "bg-[var(--status-present)]"
+                    : "bg-[var(--status-absent)]"
+              )}
+            />
             {!isCollapsed && (
-              <div className="flex-1 min-w-0">
-                <p className="text-[12.5px] font-semibold text-[var(--ink)] truncate">Nidhi Mahesh</p>
-                <p className="text-[10.5px] text-[var(--ink-faint)] truncate">Administrator</p>
+              <div className="min-w-0">
+                <p className="text-[11.5px] font-semibold text-[var(--ink)]">
+                  {isHealthy === null ? "Contacting API" : isHealthy ? "Backend healthy" : "Backend degraded"}
+                </p>
+                <p className="text-[10px] text-[var(--ink-faint)] truncate">
+                  {(health.data?.checks ?? []).filter((check) => !check.healthy).length || 0} checks failing
+                </p>
               </div>
-            )}
-            {!isCollapsed && (
-              <button
-                onClick={() => alert("Logged out.")}
-                className="text-[var(--ink-faint)] hover:text-[var(--ink)] transition-colors p-1 rounded"
-              >
-                <LogOut className="h-3.5 w-3.5" />
-              </button>
             )}
           </div>
         </div>

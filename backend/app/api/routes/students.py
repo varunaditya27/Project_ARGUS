@@ -8,6 +8,7 @@ from fastapi import APIRouter, File, Form, Query, UploadFile, status
 
 from app.api.deps import (
     AttendanceServiceDep,
+    ObjectStorageDep,
     PageLimit,
     PageOffset,
     RecognitionServiceDep,
@@ -18,7 +19,7 @@ from app.schemas.attendance import StudentAttendanceRecord
 from app.schemas.common import DEFAULT_PAGE_SIZE, KeysetPage, OffsetPage
 from app.schemas.recognition import EnrollmentResult
 from app.schemas.registration import ImportReport
-from app.schemas.student import StudentCreate, StudentRead, StudentTemplates
+from app.schemas.student import StudentCreate, StudentRead, StudentTemplates, UploadedImage
 
 router = APIRouter(prefix="/students", tags=["students"])
 
@@ -58,6 +59,18 @@ async def import_students(
         class_id=class_id,
         dry_run=dry_run,
     )
+
+
+@router.post("/image", response_model=UploadedImage)
+async def upload_enrollment_image(
+    storage: ObjectStorageDep,
+    image: UploadFile = File(description="Photograph to store for a student about to be created."),
+) -> UploadedImage:
+    # Park an image in object storage and hand back the URL POST /students needs.
+    stored = await storage.put_image(
+        await image.read(), namespace="uploads", filename=image.filename
+    )
+    return UploadedImage(key=stored.key, url=stored.url)
 
 
 @router.get("", response_model=KeysetPage[StudentRead])

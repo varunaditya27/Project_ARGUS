@@ -1,119 +1,93 @@
-# Project ARGUS - Frontend Application
+# Project ARGUS - Frontend
 
-> **Production-Quality Modern SaaS Interface for ARGUS (Masked Face Recognition Attendance System)**
+Next.js 16 (App Router) operator console for the ARGUS attendance backend. Every
+screen reads from the FastAPI service in `../backend`; there is no mock data and
+nothing is displayed that the API cannot supply.
 
-This is the complete, high-performance, and modular frontend for **Project ARGUS**, built with **Next.js 15 (App Router)**, **TypeScript**, **Tailwind CSS**, **shadcn/ui design language**, **Framer Motion**, and **TanStack Query**.
+## Quick start
 
----
+```bash
+cd frontend
+npm install
+cp .env.local.example .env.local     # then point it at your backend
+npm run dev                          # http://localhost:3001
+```
 
-## 🚀 Key Features & Highlights
+The backend must be running and reachable, and its `ARGUS_CORS_ORIGINS` must
+include this origin:
 
-- **Linear / Vercel / Stripe Dashboard Aesthetic**: Modern dark mode first, subtle micro-animations, glassmorphism card containers, curated typography, and high contrast status indicators.
-- **Webcam Viewport Placeholders (Zero Stock Images)**: Production-ready `<video>` viewport components pre-wired for `navigator.mediaDevices.getUserMedia()` integration without requiring layout refactoring. Includes controls for Start/Stop Stream, Snapshot Capture, Switch Device, and Fullscreen.
-- **Dynamic Bounding Box Overlays**: Real-time bounding box overlays for recognized faces, unmasked targets, confidence percentages, mask detection badges, and unknown subject alerts.
-- **Complete Feature Pages**:
-  1. **Dashboard**: Executive summary, KPI stat cards, Recharts accuracy trends (Baseline vs Masked ArcFace vs ARGUS), daily attendance bar charts, and live activity stream.
-  2. **Enrollment**: Multi-step student enrollment form (React Hook Form + Zod), drag-and-drop file upload, webcam snapshot capture, and animated 5-step synthetic mask generation status checklist.
-  3. **Live Recognition**: Real-time recognition viewport with target bounding box overlays, stream control buttons, latency/FPS metrics, live recognition stream table, and expected attendance checklist.
-  4. **Attendance Log**: Professional table with live search, date/class/status filters, column sorting, pagination, and instant CSV/PDF export triggers.
-  5. **Students Roster**: Full CRUD UI, student profile cards with initial avatars (**no photographs**), search, department filtering, and modal dialogs.
-  6. **Classrooms**: Hardware node status cards, seating capacity gauges, assigned faculty, and quick stream launcher.
-  7. **Sessions**: Active session hero card, timetable scheduler, and session creation modal.
-  8. **Reports**: Recognition accuracy gap analysis charts, department breakdown, and weekly matrix heatmaps.
-  9. **Settings**: Hyper-parameter sliders (cosine similarity cutoff, synthetic mask variant count, unknown rejection cutoff), model backbone selectors, theme toggles, and vector storage health.
+```bash
+ARGUS_CORS_ORIGINS=http://localhost:3001
+```
 
----
+## Configuration
 
-## 📂 Scalable Clean Architecture & Directory Structure
+| Variable | Default | Purpose |
+|---|---|---|
+| `NEXT_PUBLIC_API_URL` | `http://localhost:8000/api/v1` | Base URL of the API, including the prefix. |
+
+Enrollment images are served by whichever object storage the backend is
+configured with. For local development set `ARGUS_OBJECT_STORAGE_MODE=local` and
+the backend stores images on disk and serves them from `/media` - see
+`docs/database_setup.md`.
+
+## Layout
 
 ```text
-frontend/
-├── src/
-│   ├── app/                    # Next.js App Router Page Routes
-│   │   ├── (pages)/
-│   │   │   ├── page.tsx        # Executive Dashboard
-│   │   │   ├── enrollment/     # Face Enrollment & Synthetic Mask Generation
-│   │   │   ├── live-recognition/# Real-time Detection Viewport
-│   │   │   ├── attendance/     # Attendance Records Log
-│   │   │   ├── students/       # Student Roster CRUD
-│   │   │   ├── classrooms/     # Physical Rooms & Hardware Nodes
-│   │   │   ├── sessions/       # Timetable & Session Scheduler
-│   │   │   ├── reports/        # Accuracy & Attendance Analytics
-│   │   │   └── settings/       # Hyperparameters & Model Configs
-│   │   ├── globals.css         # Design Tokens, Animations & Theme CSS
-│   │   └── layout.tsx          # Root Layout & Theme Configuration
-│   ├── components/
-│   │   ├── ui/                 # Atomic UI Components (Button, Card, Badge, Dialog, etc.)
-│   │   ├── common/             # Layout Navigation (Sidebar, Header, SearchModal, Notifications)
-│   │   └── webcam/             # Webcam Viewport & Live Recognition Overlays
-│   ├── services/               # API Abstraction Layer (mocked Promises, ready for FastAPI)
-│   │   ├── api.ts              # Base HTTP Client & Delay Simulator
-│   │   ├── student.ts          # Student API Service
-│   │   ├── attendance.ts       # Attendance API Service
-│   │   ├── recognition.ts      # Recognition Stream API Service
-│   │   ├── session.ts          # Session API Service
-│   │   ├── classroom.ts        # Classroom API Service
-│   │   ├── report.ts           # Report API Service
-│   │   └── settings.ts         # Settings API Service
-│   ├── store/                  # Zustand Client State Management
-│   │   ├── use-theme-store.ts
-│   │   ├── use-sidebar-store.ts
-│   │   ├── use-live-recognition-store.ts
-│   │   └── use-enrollment-store.ts
-│   ├── types/                  # Strict TypeScript Interfaces
-│   ├── mock/                   # Realistic Mock Datasets
-│   ├── hooks/                  # Custom Hooks (Webcam, Time, Keyboard Shortcuts)
-│   ├── lib/                    # Utilities & Class Merging (clsx, twMerge)
-│   ├── providers/              # React Query & Theme Providers
-│   └── layouts/                # Dashboard Layout Wrapper
-├── package.json
-└── README.md
+src/
+├── app/                  # one directory per route
+│   ├── page.tsx          # dashboard: session counts, dependency health
+│   ├── enrollment/       # file picker or webcam capture -> upload -> create -> enroll
+│   ├── live-recognition/ # posts webcam frames to POST /recognize
+│   ├── attendance/       # per-session register, status filter, CSV export
+│   ├── students/         # roster with keyset pagination
+│   ├── import/           # bulk CSV + ZIP roster import
+│   ├── classrooms/       # classroom list and creation
+│   ├── sessions/         # open a session, close it, jump to its register
+│   ├── reports/          # attendance rates derived from session summaries
+│   └── settings/         # read-only view of /models and /health
+├── services/             # one module per API area; the only place fetch is called
+├── types/                # mirrors backend/app/schemas, snake_case as the API sends it
+├── components/           # ui primitives, webcam viewport, shared async states
+└── hooks/, store/        # camera driver, sidebar and theme state
 ```
 
----
+## How it talks to the backend
 
-## ⚡ Getting Started & Running Locally
+`services/api.ts` is the only module that calls `fetch`. It prefixes the base
+URL, unwraps the backend's error envelope into an `ApiError` carrying `code`,
+`status` and `details`, and exposes `get`/`post`/`postForm`/`delete`. Pages use
+TanStack Query on top of the service modules, and render failures with
+`components/common/async-state.tsx`, which shows the backend's own message
+instead of a generic one.
 
-### 1. Install Dependencies
+Endpoints in use:
+
+| Screen | Calls |
+|---|---|
+| Dashboard | `GET /health`, `GET /models`, `GET /classrooms`, `GET /sessions`, `GET /sessions/{id}/attendance/summary` |
+| Enrollment | `POST /students/image`, `POST /students`, `POST /students/{id}/enroll` |
+| Live recognition | `GET /models`, `GET /sessions?status=ACTIVE`, `GET /students`, `POST /recognize` |
+| Attendance | `GET /sessions`, `GET /sessions/{id}/attendance`, `.../attendance/summary` |
+| Students | `GET /students`, `DELETE /students/{id}` |
+| Bulk import | `POST /students/import` |
+| Classrooms | `GET /classrooms`, `POST /classrooms` |
+| Sessions | `GET /sessions`, `POST /sessions`, `POST /sessions/{id}/close` |
+| Reports | `GET /sessions`, `GET /classrooms`, `.../attendance/summary` |
+| System | `GET /models`, `GET /health` |
+
+## What the UI deliberately does not show
+
+The schema in `docs/db.md` has no student email, no per-student accuracy score,
+no camera inventory and no "late" attendance state, so no screen invents them.
+Recognition marks attendance only when `GET /models` reports
+`recognition_ready: true`; until the thresholds are calibrated the API answers
+`HUMAN_REVIEW` or `UNKNOWN` and the header says so.
+
+## Checks
+
 ```bash
-npm install
+npx tsc --noEmit    # types
+npm run lint        # eslint, including the React Compiler rules
+npm run build       # production build
 ```
-
-### 2. Start Development Server
-```bash
-npm run dev
-```
-Open [http://localhost:3000](http://localhost:3000) in your browser.
-
----
-
-## 🔗 Connecting to FastAPI Backend
-
-To connect this frontend application to the FastAPI backend:
-1. Update `process.env.NEXT_PUBLIC_API_URL` in `.env.local` to point to your FastAPI server (`http://localhost:8000/api/v1`).
-2. Open `src/services/*.ts` files and replace the `simulateDelay` mocked responses with actual `fetch` or `axios` calls to your API endpoints. No component refactoring is required!
-
----
-
-## 📷 Connecting Real Webcam Stream
-
-The webcam component (`src/components/webcam/webcam-viewport-placeholder.tsx`) includes a `<video ref={videoRef}>` element. To stream real user camera feeds:
-```ts
-const stream = await navigator.mediaDevices.getUserMedia({ video: true });
-if (videoRef.current) {
-  videoRef.current.srcObject = stream;
-}
-```
-
----
-
-## 🛠️ Technology Stack
-
-- **Framework**: Next.js 15 (App Router)
-- **Language**: TypeScript
-- **Styling**: Tailwind CSS
-- **Components**: Radix UI Primitives / Lucide Icons
-- **State Management**: Zustand & TanStack Query (React Query)
-- **Forms & Validation**: React Hook Form + Zod
-- **Visualizations**: Recharts
-- **Animations**: Framer Motion

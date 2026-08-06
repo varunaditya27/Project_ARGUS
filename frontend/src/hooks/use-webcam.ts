@@ -1,10 +1,19 @@
 "use client";
 
-import { useState, useRef, useCallback, useEffect } from "react";
+import { useState, useRef, useCallback, useEffect, type RefObject } from "react";
 
 type PermissionStatus = "granted" | "prompt" | "denied";
 
-export function useWebcam() {
+/**
+ * Drives a camera stream into refs the caller owns.
+ *
+ * The refs are arguments rather than return values so the hook hands back plain
+ * state, which components can read during render.
+ */
+export function useWebcam(
+  videoRef: RefObject<HTMLVideoElement | null>,
+  containerRef: RefObject<HTMLDivElement | null>
+) {
   const [isCameraActive, setIsCameraActive] = useState(false);
   const [permissionStatus, setPermissionStatus] = useState<PermissionStatus>("prompt");
   const [resolution, setResolutionLabel] = useState("—");
@@ -15,8 +24,6 @@ export function useWebcam() {
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const videoRef = useRef<HTMLVideoElement | null>(null);
-  const containerRef = useRef<HTMLDivElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const fpsIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const frameCountRef = useRef(0);
@@ -26,9 +33,11 @@ export function useWebcam() {
     navigator.mediaDevices?.enumerateDevices().then((devs) => {
       const cams = devs.filter((d) => d.kind === "videoinput");
       setDevices(cams);
-      if (cams.length > 0 && !selectedDeviceId) {
-        setSelectedDeviceId(cams[0].deviceId);
-        setSelectedDeviceLabel(cams[0].label || "Camera 1");
+      if (cams.length > 0) {
+        setSelectedDeviceId((current) => current || cams[0].deviceId);
+        setSelectedDeviceLabel((current) =>
+          current === "No camera selected" ? cams[0].label || "Camera 1" : current
+        );
       }
     }).catch(() => {});
   }, []);
@@ -60,9 +69,10 @@ export function useWebcam() {
       const stream = await navigator.mediaDevices.getUserMedia(constraints);
       streamRef.current = stream;
 
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-        await videoRef.current.play().catch(() => {});
+      const video = videoRef.current;
+      if (video) {
+        video.srcObject = stream;
+        await video.play().catch(() => {});
       }
 
       // Read actual resolution from track settings
@@ -111,15 +121,16 @@ export function useWebcam() {
       }
       setIsCameraActive(false);
     }
-  }, [selectedDeviceId]);
+  }, [selectedDeviceId, videoRef]);
 
   const stopCamera = useCallback(() => {
     if (streamRef.current) {
       streamRef.current.getTracks().forEach((t) => t.stop());
       streamRef.current = null;
     }
-    if (videoRef.current) {
-      videoRef.current.srcObject = null;
+    const video = videoRef.current;
+    if (video) {
+      video.srcObject = null;
     }
     if (fpsIntervalRef.current) {
       clearInterval(fpsIntervalRef.current);
@@ -127,7 +138,7 @@ export function useWebcam() {
     setIsCameraActive(false);
     setFps(0);
     setResolutionLabel("—");
-  }, []);
+  }, [videoRef]);
 
   const switchCamera = useCallback((deviceId: string) => {
     const dev = devices.find((d) => d.deviceId === deviceId);
@@ -140,23 +151,24 @@ export function useWebcam() {
 
   // Capture a frame from the video element to a canvas, return a data URL
   const captureFrame = useCallback((): string | null => {
-    if (!videoRef.current || !isCameraActive) return null;
     const video = videoRef.current;
+    if (!video || !isCameraActive) return null;
     const canvas = document.createElement("canvas");
     canvas.width = video.videoWidth;
     canvas.height = video.videoHeight;
     canvas.getContext("2d")?.drawImage(video, 0, 0);
     return canvas.toDataURL("image/png");
-  }, [isCameraActive]);
+  }, [isCameraActive, videoRef]);
 
   const toggleFullscreen = useCallback(() => {
-    if (!containerRef.current) return;
+    const container = containerRef.current;
+    if (!container) return;
     if (!document.fullscreenElement) {
-      containerRef.current.requestFullscreen().catch(() => {});
+      container.requestFullscreen().catch(() => {});
     } else {
       document.exitFullscreen().catch(() => {});
     }
-  }, []);
+  }, [containerRef]);
 
   // Cleanup on unmount
   useEffect(() => {
@@ -180,8 +192,6 @@ export function useWebcam() {
     selectedDeviceLabel,
     isFullscreen,
     error,
-    videoRef,
-    containerRef,
     startCamera: () => startCamera(),
     stopCamera,
     switchCamera,

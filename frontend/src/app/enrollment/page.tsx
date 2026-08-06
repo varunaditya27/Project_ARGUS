@@ -1,348 +1,241 @@
 "use client";
 
-import React, { useState, useRef, useEffect } from "react";
-import { useForm } from "react-hook-form";
-import { zodResolver } from "@hookform/resolvers/zod";
-import * as z from "zod";
-import { Upload, CheckCircle2, Loader2 } from "lucide-react";
+import React, { useRef, useState } from "react";
+import Image from "next/image";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Camera, CheckCircle2, Circle, Loader2, Upload, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
-import { WebcamViewport } from "@/components/webcam/webcam-viewport";
+import { ErrorNotice } from "@/components/common/async-state";
+import { Field } from "@/components/common/field";
 import { useWebcam } from "@/hooks/use-webcam";
-import { useEnrollmentStore } from "@/store/use-enrollment-store";
+import { classroomService } from "@/services/classroom";
+import { studentService } from "@/services/student";
+import type { EnrollmentResult } from "@/types";
 
-const enrollmentSchema = z.object({
-  name: z.string().min(2, "Full Name is required."),
-  rollNumber: z.string().min(1, "Roll Number is required."),
-  email: z.string().email("Valid institutional email is required."),
-  department: z.string().min(1, "Department is required."),
-  classroom: z.string().optional(),
-});
-
-type EnrollmentFormData = z.infer<typeof enrollmentSchema>;
+/** The three calls an enrollment makes, shown as they happen. */
+const STEPS = ["Upload photograph", "Create student record", "Build face templates"] as const;
 
 export default function EnrollmentPage() {
-  const [mounted, setMounted] = useState(false);
-  useEffect(() => setMounted(true), []);
-  const webcam = useWebcam();
-  const [snapshotPreview, setSnapshotPreview] = useState<string | null>(null);
-  const {
-    capturedImageName,
-    processingSteps,
-    isProcessing,
-    isComplete,
-    setCapturedImage,
-    startEnrollmentProcess,
-    resetEnrollment,
-  } = useEnrollmentStore();
+  const queryClient = useQueryClient();
+  const fileInput = useRef<HTMLInputElement>(null);
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const webcam = useWebcam(videoRef, containerRef);
 
-  const [activeSourceTab, setActiveSourceTab] = useState<"webcam" | "upload">("webcam");
-  const [dragActive, setDragActive] = useState(false);
-  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [image, setImage] = useState<{ blob: Blob; url: string; name: string } | null>(null);
+  const [name, setName] = useState("");
+  const [rollNo, setRollNo] = useState("");
+  const [classId, setClassId] = useState("");
+  const [step, setStep] = useState(-1);
+  const [result, setResult] = useState<EnrollmentResult | null>(null);
 
-  const {
-    register,
-    handleSubmit,
-    reset: resetForm,
-    formState: { errors },
-  } = useForm<EnrollmentFormData>({
-    resolver: zodResolver(enrollmentSchema),
-    defaultValues: {
-      name: "",
-      rollNumber: "",
-      email: "",
-      department: "Computer Science & Eng.",
-      classroom: "CSE-101",
+  const classrooms = useQuery({
+    queryKey: ["classrooms"],
+    queryFn: () => classroomService.listClassrooms({ limit: 200 }),
+  });
+
+  const pick = (blob: Blob, name: string) => {
+    if (image) URL.revokeObjectURL(image.url);
+    setImage({ blob, url: URL.createObjectURL(blob), name });
+    setResult(null);
+    setStep(-1);
+  };
+
+  const capture = async () => {
+    const dataUrl = webcam.captureFrame();
+    if (!dataUrl) return;
+    pick(await (await fetch(dataUrl)).blob(), "webcam-capture.png");
+    webcam.stopCamera();
+  };
+
+  const enroll = useMutation({
+    mutationFn: async () => {
+      if (!image) throw new Error("No photograph selected");
+      setStep(0);
+      const uploaded = await studentService.uploadImage(image.blob, image.name);
+      setStep(1);
+      const student = await studentService.createStudent({
+        student_name: name.trim(),
+        roll_no: Number(rollNo),
+        class_id: classId || null,
+        image_url: uploaded.url,
+      });
+      setStep(2);
+      // Templates need the models and ChromaDB; the student row survives either way.
+      return studentService.enrollFace(student.student_id, image.blob, image.name);
+    },
+    onSuccess: (enrollment) => {
+      setResult(enrollment);
+      setStep(STEPS.length);
+      queryClient.invalidateQueries({ queryKey: ["students"] });
     },
   });
 
-  const handleCapture = () => {
-    const dataUrl = webcam.captureFrame();
-    if (dataUrl) {
-      setSnapshotPreview(dataUrl);
-      setCapturedImage(`snapshot_${Date.now()}.png`);
-    }
-  };
-
-  const clearSnapshot = () => {
-    setSnapshotPreview(null);
-    setCapturedImage(null);
-  };
-
-  const handleFileUpload = (file: File) => {
-    setCapturedImage(file.name);
-    const url = URL.createObjectURL(file);
-    setPreviewUrl(url);
-  };
-
-  const clearUpload = () => {
-    setCapturedImage(null);
-    setPreviewUrl(null);
-    if (fileInputRef.current) fileInputRef.current.value = "";
-  };
-
-  const onSubmit = (data: EnrollmentFormData) => {
-    if (!capturedImageName) {
-      setCapturedImage("webcam_snapshot_default.png");
-    }
-    startEnrollmentProcess();
-  };
-
-  const handleReset = () => {
-    resetForm();
-    resetEnrollment();
-  };
+  const canSubmit = Boolean(image && name.trim() && Number(rollNo) > 0) && !enroll.isPending;
 
   return (
     <div className="space-y-7">
-      {/* Page Header */}
       <div>
         <h1 className="text-[22px] font-bold text-[var(--ink)] tracking-tight leading-tight">Enrollment</h1>
-        <p className="text-[12.5px] text-[var(--ink-faint)] mt-0.5">Register a new student into the recognition system</p>
+        <p className="text-[12.5px] text-[var(--ink-faint)] mt-0.5">
+          Upload or capture one unmasked, single-person photograph.
+        </p>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-        {/* Left Side: Camera/Upload Viewport */}
-        <div className="lg:col-span-7 space-y-3">
-          <div className="flex items-center justify-between">
-            <span className="text-[10.5px] font-semibold uppercase tracking-widest text-[var(--ink-faint)]">
-              Facial Input Source
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+        <div className="rounded-xl border border-[var(--stone-200)] bg-white shadow-[0_1px_3px_rgba(15,27,53,0.05)] overflow-hidden">
+          <div className="px-4 py-3 border-b border-[var(--stone-100)] flex items-center justify-between">
+            <span className="text-[11px] font-semibold uppercase tracking-widest text-[var(--ink-faint)]">
+              Photograph
             </span>
-
-            <div className="flex gap-0.5 border border-[var(--stone-300)] rounded-md p-0.5 text-[11.5px]">
+            {image ? (
               <button
-                type="button"
-                onClick={() => setActiveSourceTab("webcam")}
-                className={`px-3 py-1 rounded transition-all ${
-                  activeSourceTab === "webcam"
-                    ? "bg-[var(--ink)] text-white font-semibold"
-                    : "text-[var(--ink-faint)] hover:text-[var(--ink)]"
-                }`}
+                onClick={() => {
+                  URL.revokeObjectURL(image.url);
+                  setImage(null);
+                }}
+                className="text-[var(--ink-faint)] hover:text-[var(--ink)]"
+                title="Clear"
               >
-                Webcam
+                <X className="h-3.5 w-3.5" />
               </button>
-              <button
-                type="button"
-                onClick={() => setActiveSourceTab("upload")}
-                className={`px-3 py-1 rounded transition-all ${
-                  activeSourceTab === "upload"
-                    ? "bg-[var(--ink)] text-white font-semibold"
-                    : "text-[var(--ink-faint)] hover:text-[var(--ink)]"
-                }`}
-              >
-                Upload Image
-              </button>
-            </div>
+            ) : null}
           </div>
 
-          {activeSourceTab === "webcam" ? (
-            <div className="space-y-3">
-              {!mounted ? (
-                /* SSR placeholder — exact same dimensions so no layout shift */
-                <div className="aspect-video w-full rounded-xl bg-[#0A0C10] border border-[#1E2330] flex items-center justify-center">
-                  <span className="text-[12px] text-white/20">Initializing camera…</span>
-                </div>
+          <div className="p-4 space-y-3">
+            <div
+              ref={containerRef}
+              className="relative aspect-video rounded-lg bg-[var(--stone-100)] overflow-hidden flex items-center justify-center"
+            >
+              {image ? (
+                <Image src={image.url} alt="Selected" fill unoptimized className="object-contain" />
               ) : (
-                <WebcamViewport
-                  isCameraActive={webcam.isCameraActive}
-                  permissionStatus={webcam.permissionStatus}
-                  resolution={webcam.resolution}
-                  fps={webcam.fps}
-                  devices={webcam.devices}
-                  selectedDeviceId={webcam.selectedDeviceId}
-                  selectedDeviceLabel={webcam.selectedDeviceLabel}
-                  isFullscreen={webcam.isFullscreen}
-                  error={webcam.error}
-                  containerRef={webcam.containerRef}
-                  videoRef={webcam.videoRef}
-                  onStartCamera={webcam.startCamera}
-                  onStopCamera={webcam.stopCamera}
-                  onCapture={handleCapture}
-                  onSwitchCamera={webcam.switchCamera}
-                  onToggleFullscreen={webcam.toggleFullscreen}
+                <video
+                  ref={videoRef}
+                  className={`h-full w-full object-cover ${webcam.isCameraActive ? "" : "hidden"}`}
+                  muted
+                  playsInline
                 />
               )}
-
-              {/* Snapshot preview */}
-              {snapshotPreview && (
-                <div className="relative rounded-xl overflow-hidden border border-[var(--stone-200)] bg-[var(--stone-50)]">
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src={snapshotPreview} alt="Captured snapshot" className="w-full object-contain max-h-48" />
-                  <div className="absolute bottom-0 inset-x-0 bg-white/90 backdrop-blur-sm border-t border-[var(--stone-200)] px-4 py-2 flex items-center justify-between">
-                    <span className="text-[11.5px] font-medium text-[var(--ink)]">Snapshot captured</span>
-                    <div className="flex items-center gap-2">
-                      <button onClick={handleCapture} className="text-[11.5px] text-[var(--accent)] font-medium hover:text-[var(--ink)] transition-colors">
-                        Retake
-                      </button>
-                      <button onClick={clearSnapshot} className="text-[11.5px] text-[var(--ink-faint)] hover:text-[var(--status-absent)] transition-colors font-medium">
-                        Remove
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              )}
+              {!image && !webcam.isCameraActive ? (
+                <span className="text-[12px] text-[var(--ink-faint)]">No photograph selected</span>
+              ) : null}
             </div>
-          ) : (
 
+            {webcam.error ? (
+              <p className="text-[11.5px] text-[var(--status-absent)]">{webcam.error}</p>
+            ) : null}
 
-            /* ── Upload Tab ── */
-            <div className="space-y-3">
-              {previewUrl ? (
-                /* Image Preview */
-                <div className="relative rounded-xl overflow-hidden border border-[var(--stone-200)] bg-[var(--stone-50)]">
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img
-                    src={previewUrl}
-                    alt="Uploaded preview"
-                    className="w-full object-contain max-h-72"
-                  />
-                  <div className="absolute bottom-0 inset-x-0 bg-white/90 backdrop-blur-sm border-t border-[var(--stone-200)] px-4 py-2.5 flex items-center justify-between">
-                    <span className="text-[12px] font-medium text-[var(--ink)] truncate max-w-[60%]">
-                      {capturedImageName}
-                    </span>
-                    <div className="flex items-center gap-2">
-                      <label className="cursor-pointer text-[11.5px] text-[var(--accent)] font-medium hover:text-[var(--ink)] transition-colors">
-                        Replace
-                        <input
-                          ref={fileInputRef}
-                          type="file"
-                          accept="image/*"
-                          className="hidden"
-                          onChange={(e) => {
-                            if (e.target.files?.[0]) handleFileUpload(e.target.files[0]);
-                          }}
-                        />
-                      </label>
-                      <button
-                        onClick={clearUpload}
-                        className="text-[11.5px] text-[var(--ink-faint)] hover:text-[var(--status-absent)] transition-colors font-medium"
-                      >
-                        Remove
-                      </button>
-                    </div>
-                  </div>
-                </div>
+            <div className="flex flex-wrap gap-2">
+              <input
+                ref={fileInput}
+                type="file"
+                accept="image/*"
+                className="hidden"
+                onChange={(event) => {
+                  const file = event.target.files?.[0];
+                  if (file) pick(file, file.name);
+                }}
+              />
+              <Button variant="secondary" size="sm" onClick={() => fileInput.current?.click()}>
+                <Upload className="h-3.5 w-3.5 mr-1.5" />
+                Choose file
+              </Button>
+              {webcam.isCameraActive ? (
+                <>
+                  <Button variant="primary" size="sm" onClick={capture}>
+                    <Camera className="h-3.5 w-3.5 mr-1.5" />
+                    Capture
+                  </Button>
+                  <Button variant="ghost" size="sm" onClick={webcam.stopCamera}>
+                    Stop camera
+                  </Button>
+                </>
               ) : (
-                /* Drop Zone */
-                <div
-                  onDragOver={(e) => { e.preventDefault(); setDragActive(true); }}
-                  onDragLeave={() => setDragActive(false)}
-                  onDrop={(e) => {
-                    e.preventDefault();
-                    setDragActive(false);
-                    if (e.dataTransfer.files?.[0]) handleFileUpload(e.dataTransfer.files[0]);
-                  }}
-                  onClick={() => fileInputRef.current?.click()}
-                  className={`flex flex-col items-center justify-center gap-3 py-14 px-8 border-2 border-dashed rounded-xl text-center select-none cursor-pointer transition-colors ${
-                    dragActive
-                      ? "border-[var(--accent)] bg-[var(--accent-light)]"
-                      : "border-[var(--stone-300)] bg-[var(--stone-50)] hover:border-[var(--accent-muted)] hover:bg-[var(--accent-light)]"
-                  }`}
-                >
-                  <input
-                    ref={fileInputRef}
-                    type="file"
-                    accept="image/*"
-                    className="hidden"
-                    onChange={(e) => {
-                      if (e.target.files?.[0]) handleFileUpload(e.target.files[0]);
-                    }}
-                  />
-                  <div className="flex h-12 w-12 items-center justify-center rounded-full bg-[var(--stone-100)] border border-[var(--stone-200)]">
-                    <Upload className="h-5 w-5 text-[var(--ink-faint)]" />
-                  </div>
-                  <div>
-                    <p className="text-[13px] font-semibold text-[var(--ink)]">Drop image here</p>
-                    <p className="text-[11.5px] text-[var(--ink-faint)] mt-0.5">or click to browse — JPG, PNG, WEBP</p>
-                  </div>
-                </div>
+                <Button variant="secondary" size="sm" onClick={webcam.startCamera}>
+                  <Camera className="h-3.5 w-3.5 mr-1.5" />
+                  Use camera
+                </Button>
               )}
             </div>
-          )}
+          </div>
         </div>
 
-        {/* Right Side: Form */}
-        <div className="lg:col-span-5 space-y-5">
-          <form id="enroll-form" onSubmit={handleSubmit(onSubmit)} className="space-y-4">
-            <p className="text-[10.5px] font-semibold uppercase tracking-widest text-[var(--ink-faint)]">
-              Student Information
-            </p>
-
-            <div className="space-y-1.5">
-              <label className="text-[12px] font-semibold text-[var(--ink)]">Full Name *</label>
-              <Input placeholder="Nidhi Mahesh" {...register("name")} />
-              {errors.name && <p className="text-[11px] text-[var(--status-absent)]">{errors.name.message}</p>}
-            </div>
-
-            <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-1.5">
-                <label className="text-[12px] font-semibold text-[var(--ink)]">Roll Number *</label>
-                <Input placeholder="101" {...register("rollNumber")} />
-                {errors.rollNumber && <p className="text-[11px] text-[var(--status-absent)]">{errors.rollNumber.message}</p>}
-              </div>
-              <div className="space-y-1.5">
-                <label className="text-[12px] font-semibold text-[var(--ink)]">Section</label>
-                <Select {...register("classroom")}>
-                  <option value="CSE-101">CSE-101</option>
-                  <option value="AI-Lab">AI-Lab</option>
-                  <option value="ECE-204">ECE-204</option>
-                </Select>
-              </div>
-            </div>
-
-            <div className="space-y-1.5">
-              <label className="text-[12px] font-semibold text-[var(--ink)]">Email *</label>
-              <Input placeholder="nidhi.m@argus.edu" {...register("email")} />
-              {errors.email && <p className="text-[11px] text-[var(--status-absent)]">{errors.email.message}</p>}
-            </div>
-
-            <div className="space-y-1.5">
-              <label className="text-[12px] font-semibold text-[var(--ink)]">Department *</label>
-              <Select {...register("department")}>
-                <option value="Computer Science & Eng.">Computer Science & Eng.</option>
-                <option value="Artificial Intelligence">Artificial Intelligence</option>
-                <option value="Electronics & Comm.">Electronics & Comm.</option>
+        <div className="rounded-xl border border-[var(--stone-200)] bg-white shadow-[0_1px_3px_rgba(15,27,53,0.05)] overflow-hidden">
+          <div className="px-4 py-3 border-b border-[var(--stone-100)]">
+            <span className="text-[11px] font-semibold uppercase tracking-widest text-[var(--ink-faint)]">
+              Student
+            </span>
+          </div>
+          <div className="p-4 space-y-4">
+            {enroll.error ? <ErrorNotice error={enroll.error} /> : null}
+            <Field label="Full name">
+              <Input value={name} onChange={(event) => setName(event.target.value)} />
+            </Field>
+            <Field label="Roll number" hint="Whole number, unique across the institution.">
+              <Input
+                type="number"
+                min={1}
+                value={rollNo}
+                onChange={(event) => setRollNo(event.target.value)}
+              />
+            </Field>
+            <Field label="Classroom">
+              <Select value={classId} onChange={(event) => setClassId(event.target.value)}>
+                <option value="">Unassigned</option>
+                {classrooms.data?.items.map((room) => (
+                  <option key={room.class_id} value={room.class_id}>
+                    {room.class_name} · {room.department}
+                  </option>
+                ))}
               </Select>
-            </div>
+            </Field>
 
-            <div className="pt-3 flex items-center justify-between border-t border-[var(--stone-200)]">
-              <Button type="button" variant="ghost" size="sm" onClick={handleReset}>
-                Reset
-              </Button>
-              <Button type="submit" form="enroll-form" variant="primary" size="sm" isLoading={isProcessing}>
-                Submit Enrollment
-              </Button>
-            </div>
-          </form>
-
-          {/* Pipeline Status */}
-          <div className="rounded-xl border border-[var(--stone-200)] bg-white shadow-[0_1px_3px_rgba(15,27,53,0.05)] overflow-hidden">
-            <div className="px-4 py-3 border-b border-[var(--stone-100)] flex items-center justify-between">
-              <span className="text-[10.5px] font-semibold uppercase tracking-widest text-[var(--ink-faint)]">
-                Pipeline Status
-              </span>
-              {isComplete && <Badge variant="present">Complete</Badge>}
-            </div>
-            <div className="divide-y divide-[var(--stone-100)]">
-              {processingSteps.map((step) => (
-                <div key={step.id} className="px-4 py-2.5 flex items-center justify-between">
-                  <div className="flex items-center gap-2.5">
-                    {step.status === "completed" ? (
-                      <CheckCircle2 className="h-3.5 w-3.5 text-[var(--status-present)] shrink-0" />
-                    ) : step.status === "processing" ? (
-                      <Loader2 className="h-3.5 w-3.5 text-[var(--accent)] animate-spin shrink-0" />
-                    ) : (
-                      <div className="h-3.5 w-3.5 rounded-full border border-[var(--stone-300)] shrink-0" />
-                    )}
-                    <span className="text-[12.5px] text-[var(--ink)]">{step.label}</span>
-                  </div>
-                  <span className="text-[10.5px] text-[var(--ink-faint)] capitalize">{step.status}</span>
+            <div className="space-y-2 pt-1">
+              {STEPS.map((label, index) => (
+                <div key={label} className="flex items-center gap-2 text-[12px]">
+                  {step > index ? (
+                    <CheckCircle2 className="h-3.5 w-3.5 text-[var(--status-present)]" />
+                  ) : step === index ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin text-[var(--accent)]" />
+                  ) : (
+                    <Circle className="h-3.5 w-3.5 text-[var(--stone-300)]" />
+                  )}
+                  <span className={step > index ? "text-[var(--ink)]" : "text-[var(--ink-faint)]"}>
+                    {label}
+                  </span>
                 </div>
               ))}
             </div>
+
+            {result ? (
+              <div className="rounded-lg border border-[#A8D8BC] bg-[var(--status-present-bg)] px-3 py-2.5">
+                <p className="text-[12px] font-semibold text-[var(--status-present)]">
+                  {result.templates_stored} templates stored
+                </p>
+                <div className="flex flex-wrap gap-1 mt-1.5">
+                  {result.stored_variants.map((variant) => (
+                    <Badge key={variant} variant="secondary">
+                      {variant}
+                    </Badge>
+                  ))}
+                </div>
+              </div>
+            ) : null}
+
+            <Button
+              variant="primary"
+              size="sm"
+              className="w-full"
+              disabled={!canSubmit}
+              isLoading={enroll.isPending}
+              onClick={() => enroll.mutate()}
+            >
+              Enroll student
+            </Button>
           </div>
         </div>
       </div>

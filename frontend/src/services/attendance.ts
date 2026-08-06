@@ -1,48 +1,45 @@
-import { simulateDelay } from "./api";
-import { MOCK_ATTENDANCE_RECORDS } from "@/mock/attendance-mock";
-import { AttendanceRecord, RecognitionStatus } from "@/types";
-
-let localAttendance = [...MOCK_ATTENDANCE_RECORDS];
+import { api, query } from "./api";
+import type { AttendanceRecord, AttendanceStatus, AttendanceSummary, KeysetPage } from "@/types";
 
 export const attendanceService = {
-  async getAttendanceRecords(filters?: {
-    search?: string;
-    classSession?: string;
-    status?: RecognitionStatus;
-  }): Promise<AttendanceRecord[]> {
-    let records = [...localAttendance];
-    if (filters?.search) {
-      const q = filters.search.toLowerCase();
-      records = records.filter(
-        (r) =>
-          r.studentName.toLowerCase().includes(q) ||
-          r.rollNumber.toLowerCase().includes(q) ||
-          r.department.toLowerCase().includes(q)
-      );
-    }
-    if (filters?.status) {
-      records = records.filter((r) => r.status === filters.status);
-    }
-    return simulateDelay(records, 250);
+  /** Keyset page of one session's register, ordered by roll number. */
+  register(
+    sessionId: string,
+    params: { status?: AttendanceStatus; after?: number; limit?: number } = {}
+  ) {
+    return api.get<KeysetPage<AttendanceRecord>>(
+      `/sessions/${sessionId}/attendance${query({ ...params })}`
+    );
   },
 
-  async markAttendance(record: Omit<AttendanceRecord, "id">): Promise<AttendanceRecord> {
-    const newRecord: AttendanceRecord = {
-      ...record,
-      id: `att_${Date.now()}`,
-    };
-    localAttendance.unshift(newRecord);
-    return simulateDelay(newRecord, 200);
+  summary(sessionId: string) {
+    return api.get<AttendanceSummary>(`/sessions/${sessionId}/attendance/summary`);
   },
 
-  async exportAttendanceCSV(): Promise<string> {
-    const headers = "ID,Roll No,Student Name,Department,Time,Confidence,Status,Masked\n";
-    const rows = localAttendance
-      .map(
-        (r) =>
-          `"${r.id}","${r.rollNumber}","${r.studentName}","${r.department}","${r.timestamp}","${(r.confidence * 100).toFixed(1)}%","${r.status}","${r.isMasked}"`
-      )
-      .join("\n");
-    return simulateDelay(headers + rows, 300);
+  /** Walks every page so an export covers the whole register, not one page. */
+  async registerAll(sessionId: string, pageSize = 200) {
+    const rows: AttendanceRecord[] = [];
+    let after: number | undefined;
+    for (;;) {
+      const page = await attendanceService.register(sessionId, { after, limit: pageSize });
+      rows.push(...page.items);
+      if (page.next_cursor === null) return rows;
+      after = page.next_cursor;
+    }
+  },
+
+  toCsv(rows: AttendanceRecord[]) {
+    // Absent rows carry the close instant and a zero confidence, by design.
+    const header = "roll_no,student_name,status,timestamp,confidence";
+    const body = rows.map((row) =>
+      [
+        row.roll_no,
+        `"${row.student_name.replace(/"/g, '""')}"`,
+        row.status,
+        row.timestamp,
+        row.confidence.toFixed(4),
+      ].join(",")
+    );
+    return [header, ...body].join("\n");
   },
 };

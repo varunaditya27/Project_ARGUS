@@ -1,196 +1,252 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
-import Link from "next/link";
-import { Play, Pause, Square, ArrowRight } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import React, { useCallback, useEffect, useRef, useState } from "react";
+
+import { useQuery } from "@tanstack/react-query";
+import { AlertTriangle, Play, Square } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
-import { Table, TableHeader, TableBody, TableHead, TableRow, TableCell } from "@/components/ui/table";
-import { WebcamViewport } from "@/components/webcam/webcam-viewport";
+import { Button } from "@/components/ui/button";
+import { Select } from "@/components/ui/select";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { ErrorNotice } from "@/components/common/async-state";
 import { LiveRecognitionOverlay } from "@/components/webcam/live-recognition-overlay";
+import { WebcamViewport } from "@/components/webcam/webcam-viewport";
 import { useWebcam } from "@/hooks/use-webcam";
-import { useLiveRecognitionStore } from "@/store/use-live-recognition-store";
-import { MOCK_ATTENDANCE_RECORDS } from "@/mock/attendance-mock";
-import { Avatar } from "@/components/ui/avatar";
+import { recognitionService } from "@/services/recognition";
+import { sessionService } from "@/services/session";
+import { studentService } from "@/services/student";
+import type { FaceDecision } from "@/types";
+
+/** Frames are sent one at a time; this is the pause between round trips. */
+const FRAME_INTERVAL_MS = 700;
 
 export default function LiveRecognitionPage() {
-  const [mounted, setMounted] = useState(false);
-  useEffect(() => setMounted(true), []);
-  const webcam = useWebcam();
-  const {
-    isDetecting,
-    isPaused,
-    metrics,
-    overlays,
-    startDetection,
-    stopDetection,
-    pauseDetection,
-    resumeDetection,
-    clearResults,
-  } = useLiveRecognitionStore();
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const webcam = useWebcam(videoRef, containerRef);
+  const [sessionId, setSessionId] = useState("");
+  const [isRunning, setIsRunning] = useState(false);
+  const [faces, setFaces] = useState<FaceDecision[]>([]);
+  const [frameSize, setFrameSize] = useState({ width: 0, height: 0 });
+  const [latency, setLatency] = useState<number | null>(null);
+  const [error, setError] = useState<unknown>(null);
+  const frameNumber = useRef(0);
+  const running = useRef(false);
 
-  const [recognitionLogs] = useState(MOCK_ATTENDANCE_RECORDS);
+  const models = useQuery({ queryKey: ["models"], queryFn: () => recognitionService.models() });
+  const sessions = useQuery({
+    queryKey: ["sessions", "ACTIVE"],
+    queryFn: () => sessionService.listSessions({ status: "ACTIVE", limit: 50 }),
+  });
+
+  const session = sessions.data?.items.find((item) => item.session_id === sessionId);
+  const roster = useQuery({
+    queryKey: ["students", session?.class_id],
+    queryFn: () => studentService.listStudents({ classId: session?.class_id, limit: 200 }),
+    enabled: Boolean(session?.class_id),
+  });
+
+  const nameFor = useCallback(
+    (studentId: string | null) =>
+      roster.data?.items.find((student) => student.student_id === studentId)?.student_name ??
+      studentId?.slice(0, 8) ??
+      "—",
+    [roster.data]
+  );
+
+  // One frame in flight at a time, so a slow reply cannot build a backlog.
+  useEffect(() => {
+    if (!isRunning) return;
+    running.current = true;
+    let timer: ReturnType<typeof setTimeout>;
+
+    const grabFrame = async (): Promise<Blob | null> => {
+      const video = videoRef.current;
+      if (!video?.videoWidth) return null;
+      const canvas = document.createElement("canvas");
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+      canvas.getContext("2d")?.drawImage(video, 0, 0);
+      setFrameSize({ width: canvas.width, height: canvas.height });
+      return new Promise((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.85));
+    };
+
+    const loop = async () => {
+      while (running.current) {
+        const frame = await grabFrame();
+        if (frame) {
+          const startedAt = performance.now();
+          try {
+            frameNumber.current += 1;
+            const result = await recognitionService.recognizeFrame(
+              frame,
+              sessionId || undefined,
+              `frame-${frameNumber.current.toString().padStart(6, "0")}`
+            );
+            setFaces(result.faces);
+            setLatency(Math.round(performance.now() - startedAt));
+            setError(null);
+          } catch (caught) {
+            setError(caught);
+            running.current = false;
+            setIsRunning(false);
+            return;
+          }
+        }
+        await new Promise((resolve) => {
+          timer = setTimeout(resolve, FRAME_INTERVAL_MS);
+        });
+      }
+    };
+    void loop();
+
+    return () => {
+      running.current = false;
+      clearTimeout(timer);
+    };
+  }, [isRunning, sessionId, videoRef]);
 
   return (
     <div className="space-y-6">
-      {/* Page Header */}
-      <div className="flex items-start justify-between">
+      <div className="flex items-start justify-between flex-wrap gap-3">
         <div>
-          <h1 className="text-[22px] font-bold text-[var(--ink)] tracking-tight leading-tight">Live Recognition</h1>
+          <h1 className="text-[22px] font-bold text-[var(--ink)] tracking-tight leading-tight">
+            Live Recognition
+          </h1>
           <p className="text-[12.5px] text-[var(--ink-faint)] mt-0.5">
-            Session: CSE-101 &nbsp;·&nbsp;
-            Latency: <span className="font-semibold text-[var(--ink)]">{metrics.latencyMs}ms</span> &nbsp;·&nbsp;
-            FPS: <span className="font-semibold text-[var(--ink)]">{metrics.fps}</span>
+            {latency !== null ? `Round trip: ${latency} ms · ` : ""}
+            {faces.length} face{faces.length === 1 ? "" : "s"} in the last frame
           </p>
         </div>
-      </div>
-
-      {/* Webcam viewport */}
-      {!mounted ? (
-        <div className="aspect-video w-full rounded-xl bg-[#0A0C10] border border-[#1E2330] flex items-center justify-center">
-          <span className="text-[12px] text-white/20">Initializing camera…</span>
-        </div>
-      ) : (
-        <WebcamViewport
-          isCameraActive={webcam.isCameraActive}
-          permissionStatus={webcam.permissionStatus}
-          resolution={webcam.resolution}
-          fps={webcam.fps}
-          devices={webcam.devices}
-          selectedDeviceId={webcam.selectedDeviceId}
-          selectedDeviceLabel={webcam.selectedDeviceLabel}
-          isFullscreen={webcam.isFullscreen}
-          error={webcam.error}
-          containerRef={webcam.containerRef}
-          videoRef={webcam.videoRef}
-          onStartCamera={webcam.startCamera}
-          onStopCamera={webcam.stopCamera}
-          onSwitchCamera={webcam.switchCamera}
-          onToggleFullscreen={webcam.toggleFullscreen}
+        <Select
+          value={sessionId}
+          onChange={(event) => setSessionId(event.target.value)}
+          className="w-80"
+          disabled={isRunning}
         >
-          {isDetecting && !isPaused && <LiveRecognitionOverlay overlays={overlays} />}
-        </WebcamViewport>
-      )}
-
-      {/* Detection Engine Controls */}
-      <div className="flex items-center justify-between px-4 py-3 rounded-xl border border-[var(--stone-200)] bg-white shadow-[0_1px_3px_rgba(15,27,53,0.05)]">
-        <div className="flex items-center gap-2">
-          {!isDetecting ? (
-            <Button variant="primary" size="sm" onClick={startDetection}>
-              <Play className="h-3.5 w-3.5 mr-1.5 fill-current" />
-              Start Engine
-            </Button>
-          ) : isPaused ? (
-            <Button variant="primary" size="sm" onClick={resumeDetection}>
-              <Play className="h-3.5 w-3.5 mr-1.5 fill-current" />
-              Resume
-            </Button>
-          ) : (
-            <Button variant="secondary" size="sm" onClick={pauseDetection}>
-              <Pause className="h-3.5 w-3.5 mr-1.5 fill-current" />
-              Pause
-            </Button>
-          )}
-
-          {isDetecting && (
-            <Button variant="danger" size="sm" onClick={stopDetection}>
-              <Square className="h-3.5 w-3.5 mr-1.5 fill-current" />
-              Stop Engine
-            </Button>
-          )}
-
-          <Button variant="ghost" size="sm" onClick={clearResults} className="text-[var(--ink-faint)]">
-            Clear Boxes
-          </Button>
-        </div>
-
-        <div className="flex items-center gap-5 text-[12px] text-[var(--ink-faint)]">
-          <span>Detections: <span className="font-semibold text-[var(--ink)]">{overlays.length}</span></span>
-          <span>GPU: <span className="font-semibold text-[var(--ink)]">{metrics.gpuUsage}%</span></span>
-        </div>
+          <option value="">No session (recognise only, nothing recorded)</option>
+          {sessions.data?.items.map((item) => (
+            <option key={item.session_id} value={item.session_id}>
+              {item.subject} · {item.date}
+            </option>
+          ))}
+        </Select>
       </div>
 
-      {/* Tables */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
+      {models.data && !models.data.recognition_ready ? (
+        <div className="rounded-xl border border-[#DDCBA0] bg-[var(--status-late-bg)] px-4 py-3 flex items-start gap-2.5">
+          <AlertTriangle className="h-4 w-4 text-[var(--status-late)] shrink-0 mt-0.5" />
+          <p className="text-[12px] text-[var(--ink-muted)]">
+            The recognition stack is not ready, so the API will refuse frames instead of guessing.
+            Missing:{" "}
+            {models.data.components
+              .filter((component) => !component.configured)
+              .map((component) => component.name)
+              .join(", ") || "calibrated thresholds"}
+            .
+          </p>
+        </div>
+      ) : null}
 
-        {/* Recognition log */}
-        <div className="lg:col-span-7">
-          <div className="flex items-center justify-between mb-3">
-            <h2 className="text-[10.5px] font-semibold uppercase tracking-widest text-[var(--ink-faint)]">Recognition Log</h2>
-            <Link href="/attendance" className="flex items-center gap-1 text-[11.5px] text-[var(--accent)] hover:text-[var(--ink)] transition-colors font-medium">
-              History <ArrowRight className="h-3 w-3" />
-            </Link>
-          </div>
-          <div className="rounded-xl border border-[var(--stone-200)] overflow-hidden shadow-[0_1px_3px_rgba(15,27,53,0.05)]">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Time</TableHead>
-                  <TableHead>Student</TableHead>
-                  <TableHead>Confidence</TableHead>
-                  <TableHead>Status</TableHead>
+      {error ? <ErrorNotice error={error} /> : null}
+
+      <WebcamViewport
+        isCameraActive={webcam.isCameraActive}
+        permissionStatus={webcam.permissionStatus}
+        resolution={webcam.resolution}
+        fps={webcam.fps}
+        devices={webcam.devices}
+        selectedDeviceId={webcam.selectedDeviceId}
+        selectedDeviceLabel={webcam.selectedDeviceLabel}
+        isFullscreen={webcam.isFullscreen}
+        error={webcam.error}
+        containerRef={containerRef}
+        videoRef={videoRef}
+        onStartCamera={webcam.startCamera}
+        onStopCamera={webcam.stopCamera}
+        onSwitchCamera={webcam.switchCamera}
+        onToggleFullscreen={webcam.toggleFullscreen}
+      >
+        {isRunning ? (
+          <LiveRecognitionOverlay
+            faces={faces}
+            frameWidth={frameSize.width}
+            frameHeight={frameSize.height}
+            labelFor={(face) => (face.state === "MATCH" ? nameFor(face.student_id) : face.state)}
+          />
+        ) : null}
+      </WebcamViewport>
+
+      <div className="flex items-center justify-between px-4 py-3 rounded-xl border border-[var(--stone-200)] bg-white shadow-[0_1px_3px_rgba(15,27,53,0.05)]">
+        {isRunning ? (
+          <Button variant="danger" size="sm" onClick={() => setIsRunning(false)}>
+            <Square className="h-3.5 w-3.5 mr-1.5 fill-current" />
+            Stop
+          </Button>
+        ) : (
+          <Button
+            variant="primary"
+            size="sm"
+            disabled={!webcam.isCameraActive}
+            onClick={() => setIsRunning(true)}
+          >
+            <Play className="h-3.5 w-3.5 mr-1.5 fill-current" />
+            Start recognising
+          </Button>
+        )}
+        <span className="text-[11.5px] text-[var(--ink-faint)]">
+          {sessionId
+            ? "Matches are buffered and written on the capture interval."
+            : "Pick a session to record attendance."}
+        </span>
+      </div>
+
+      <div>
+        <h2 className="text-[10.5px] font-semibold uppercase tracking-widest text-[var(--ink-faint)] mb-3">
+          Last frame
+        </h2>
+        <div className="rounded-xl border border-[var(--stone-200)] overflow-hidden shadow-[0_1px_3px_rgba(15,27,53,0.05)]">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Identity</TableHead>
+                <TableHead>Detection</TableHead>
+                <TableHead>Similarity</TableHead>
+                <TableHead>Reason</TableHead>
+                <TableHead>Recorded</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {faces.map((face, index) => (
+                <TableRow key={`${index}-${face.bbox.join(",")}`}>
+                  <TableCell className="font-medium text-[12.5px] text-[var(--ink)]">
+                    {face.state === "MATCH" ? nameFor(face.student_id) : "—"}
+                  </TableCell>
+                  <TableCell className="font-mono text-[11.5px] text-[var(--ink-faint)] tabular-nums">
+                    {(face.detection_score * 100).toFixed(1)}%
+                  </TableCell>
+                  <TableCell className="font-mono text-[11.5px] text-[var(--ink-faint)] tabular-nums">
+                    {face.similarity !== null ? `${(face.similarity * 100).toFixed(1)}%` : "—"}
+                  </TableCell>
+                  <TableCell className="text-[11.5px] text-[var(--ink-muted)]">{face.reason}</TableCell>
+                  <TableCell>
+                    <Badge
+                      variant={
+                        face.state === "MATCH"
+                          ? "present"
+                          : face.state === "HUMAN_REVIEW"
+                            ? "late"
+                            : "unknown"
+                      }
+                    >
+                      {face.attendance_recorded ? "BUFFERED" : face.state}
+                    </Badge>
+                  </TableCell>
                 </TableRow>
-              </TableHeader>
-              <TableBody>
-                {recognitionLogs.slice(0, 7).map((log) => (
-                  <TableRow key={log.id}>
-                    <TableCell className="font-mono text-[11.5px] text-[var(--ink-faint)] tabular-nums">
-                      {new Date(log.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
-                    </TableCell>
-                    <TableCell>
-                      <div className="flex items-center gap-2.5">
-                        <Avatar name={log.studentName} size="sm" />
-                        <div>
-                          <p className="font-medium text-[12.5px] text-[var(--ink)]">{log.studentName}</p>
-                          <p className="text-[10.5px] font-mono text-[var(--ink-faint)]">#{log.rollNumber}</p>
-                        </div>
-                      </div>
-                    </TableCell>
-                    <TableCell className="font-semibold text-[12.5px] text-[var(--ink)] tabular-nums">
-                      {(log.confidence * 100).toFixed(1)}%
-                    </TableCell>
-                    <TableCell>
-                      <Badge variant={log.status === "PRESENT" ? "present" : log.status === "UNKNOWN" ? "unknown" : "late"}>
-                        {log.status}
-                      </Badge>
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </div>
+              ))}
+            </TableBody>
+          </Table>
         </div>
-
-        {/* Expected Roster */}
-        <div className="lg:col-span-5">
-          <h2 className="text-[10.5px] font-semibold uppercase tracking-widest text-[var(--ink-faint)] mb-3">Expected Roster</h2>
-          <div className="rounded-xl border border-[var(--stone-200)] bg-white overflow-hidden shadow-[0_1px_3px_rgba(15,27,53,0.05)] divide-y divide-[var(--stone-100)]">
-            {[
-              { name: "Nidhi Mahesh",         roll: "101", time: "09:21 AM", status: "PRESENT" },
-              { name: "Varun Aditya",          roll: "102", time: "09:22 AM", status: "PRESENT" },
-              { name: "Ishita Sharma",          roll: "104", time: "09:23 AM", status: "PRESENT" },
-              { name: "Rayyan Shaikh Ahmed",    roll: "103", time: "Pending",  status: "PENDING" },
-              { name: "Aarav Patel",            roll: "105", time: "Pending",  status: "PENDING" },
-            ].map((item, idx) => (
-              <div key={idx} className="px-4 py-3 flex items-center justify-between hover:bg-[var(--stone-50)] transition-colors">
-                <div className="flex items-center gap-2.5">
-                  <Avatar name={item.name} size="sm" />
-                  <div>
-                    <p className="text-[12.5px] font-medium text-[var(--ink)]">{item.name}</p>
-                    <p className="text-[10.5px] font-mono text-[var(--ink-faint)]">#{item.roll}</p>
-                  </div>
-                </div>
-                <div className="flex items-center gap-2">
-                  <span className="text-[10.5px] text-[var(--ink-faint)]">{item.time}</span>
-                  <Badge variant={item.status === "PRESENT" ? "present" : "secondary"}>
-                    {item.status}
-                  </Badge>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-
       </div>
     </div>
   );

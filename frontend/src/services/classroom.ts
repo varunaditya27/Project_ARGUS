@@ -1,21 +1,17 @@
-import { simulateDelay } from "./api";
-import { MOCK_CLASSROOMS } from "@/mock/sessions-mock";
-import { Classroom } from "@/types";
-
-let localClassrooms = [...MOCK_CLASSROOMS];
+import { api, query } from "./api";
+import type { Classroom, ClassroomCreate, ClassroomDetail, OffsetPage } from "@/types";
 
 export const classroomService = {
-  async getClassrooms(): Promise<Classroom[]> {
-    return simulateDelay([...localClassrooms], 200);
+  listClassrooms(params: { limit?: number; offset?: number } = {}) {
+    return api.get<OffsetPage<Classroom>>(`/classrooms${query({ ...params })}`);
   },
 
-  async createClassroom(input: Omit<Classroom, "id" | "activeStudents">): Promise<Classroom> {
-    const newClassroom: Classroom = {
-      ...input,
-      id: `cls_${Date.now()}`,
-      activeStudents: 0,
-    };
-    localClassrooms.push(newClassroom);
-    return simulateDelay(newClassroom, 300);
+  /** Adds roster_count, which is the number attendance maths actually uses. */
+  getClassroom(classId: string) {
+    return api.get<ClassroomDetail>(`/classrooms/${classId}`);
+  },
+
+  createClassroom(input: ClassroomCreate) {
+    return api.post<Classroom>("/classrooms", input);
   },
 };

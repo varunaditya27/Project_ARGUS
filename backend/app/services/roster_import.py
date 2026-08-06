@@ -76,7 +76,7 @@ class RosterImportService:
                     "Object storage is not configured, so enrollment images cannot be uploaded.",
                     details={
                         "component": "object_storage",
-                        "required": "ARGUS_OBJECT_STORAGE_MODE=r2 and the ARGUS_R2_* settings",
+                        "required": "ARGUS_OBJECT_STORAGE_MODE=local or r2",
                     },
                 )
             await self._reject_unknown_classrooms(plan)

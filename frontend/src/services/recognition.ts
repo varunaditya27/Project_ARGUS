@@ -1,21 +1,55 @@
-import { simulateDelay } from "./api";
-import { MOCK_ACTIVE_OVERLAYS, MOCK_LIVE_METRICS } from "@/mock/recognition-mock";
-import { BoundingBox, LiveMetrics } from "@/types";
+import { api } from "./api";
+import type { FrameResult, HealthResponse, ModelsResponse } from "@/types";
+
+interface OfflineRunResult {
+  session_id: string | null;
+  processed: number;
+  skipped: number;
+  faces_detected: number;
+  matched: number;
+  human_review: number;
+  unknown: number;
+  attendance_observations: number;
+}
+
+function upload(field: string, file: Blob, filename: string, sessionId?: string) {
+  const form = new FormData();
+  form.append(field, file, filename);
+  if (sessionId) form.append("session_id", sessionId);
+  return form;
+}
 
 export const recognitionService = {
-  async getLiveMetrics(): Promise<LiveMetrics> {
-    return simulateDelay(MOCK_LIVE_METRICS, 150);
+  /** One frame. With a session_id, a MATCH is buffered as attendance. */
+  recognizeFrame(frame: Blob, sessionId?: string, frameId?: string) {
+    const form = upload("frame", frame, "frame.jpg", sessionId);
+    if (frameId) form.append("frame_id", frameId);
+    return api.postForm<FrameResult>("/recognize", form);
   },
 
-  async getActiveDetections(): Promise<BoundingBox[]> {
-    return simulateDelay(MOCK_ACTIVE_OVERLAYS, 150);
+  recognizeVideo(video: File, sessionId?: string) {
+    return api.postForm<OfflineRunResult>(
+      "/recognize/video",
+      upload("video", video, video.name, sessionId)
+    );
   },
 
-  async startStream(): Promise<{ success: boolean; message: string }> {
-    return simulateDelay({ success: true, message: "Detection engine activated." }, 300);
+  recognizeBatch(archive: File, sessionId?: string) {
+    return api.postForm<OfflineRunResult>(
+      "/recognize/batch",
+      upload("archive", archive, archive.name, sessionId)
+    );
   },
 
-  async stopStream(): Promise<{ success: boolean; message: string }> {
-    return simulateDelay({ success: true, message: "Detection engine paused." }, 200);
+  /** Which vision components are wired, and whether thresholds are calibrated. */
+  models() {
+    return api.get<ModelsResponse>("/models");
+  },
+
+  /** Answers 503 while a dependency is down; the body still lists the probes. */
+  health() {
+    return api.get<HealthResponse>("/health", [503]);
   },
 };
+
+export type { OfflineRunResult };

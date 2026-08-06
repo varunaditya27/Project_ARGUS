@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { DM_Serif_Display } from "next/font/google";
 import "./globals.css";
 import { DashboardLayout } from "@/layouts/dashboard-layout";
+import { QueryProvider } from "@/providers/query-provider";
 
 const dmSerifDisplay = DM_Serif_Display({
   subsets: ["latin"],
@@ -23,7 +24,9 @@ export default function RootLayout({
   return (
     <html lang="en" className={dmSerifDisplay.variable}>
       <body>
-        <DashboardLayout>{children}</DashboardLayout>
+        <QueryProvider>
+          <DashboardLayout>{children}</DashboardLayout>
+        </QueryProvider>
       </body>
     </html>
   );

@@ -1,185 +1,161 @@
 "use client";
 
 import React, { useState } from "react";
-import { Search, UserPlus, Trash2 } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Select } from "@/components/ui/select";
-import { Badge } from "@/components/ui/badge";
+import Link from "next/link";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { ChevronLeft, ChevronRight, Trash2, UserPlus } from "lucide-react";
 import { Avatar } from "@/components/ui/avatar";
-import { Table, TableHeader, TableBody, TableHead, TableRow, TableCell } from "@/components/ui/table";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
-import { MOCK_STUDENTS } from "@/mock/students-mock";
-import { Student } from "@/types";
+import { Button } from "@/components/ui/button";
+import { Select } from "@/components/ui/select";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { AsyncState, ErrorNotice } from "@/components/common/async-state";
+import { classroomService } from "@/services/classroom";
+import { studentService } from "@/services/student";
+
+const PAGE_SIZE = 50;
 
 export default function StudentsPage() {
-  const [students, setStudents] = useState<Student[]>(MOCK_STUDENTS);
-  const [search, setSearch] = useState("");
-  const [deptFilter, setDeptFilter] = useState("ALL");
-  const [isAddModalOpen, setIsAddModalOpen] = useState(false);
-  const [newStudent, setNewStudent] = useState({
-    name: "",
-    rollNumber: "",
-    email: "",
-    department: "Computer Science & Eng.",
+  const queryClient = useQueryClient();
+  const [classId, setClassId] = useState("");
+  // Keyset cursors: one roll_no per page visited, so Back is exact.
+  const [cursors, setCursors] = useState<(number | undefined)[]>([undefined]);
+  const [pageIndex, setPageIndex] = useState(0);
+
+  const classrooms = useQuery({
+    queryKey: ["classrooms"],
+    queryFn: () => classroomService.listClassrooms({ limit: 200 }),
   });
 
-  const filtered = students.filter((s) => {
-    const matchesSearch =
-      s.name.toLowerCase().includes(search.toLowerCase()) ||
-      s.rollNumber.toLowerCase().includes(search.toLowerCase()) ||
-      s.email.toLowerCase().includes(search.toLowerCase());
-    const matchesDept = deptFilter === "ALL" || s.department === deptFilter;
-    return matchesSearch && matchesDept;
+  const after = cursors[pageIndex];
+  const students = useQuery({
+    queryKey: ["students", classId, after],
+    queryFn: () => studentService.listStudents({ classId: classId || undefined, after, limit: PAGE_SIZE }),
   });
 
-  const handleCreateStudent = () => {
-    if (!newStudent.name || !newStudent.rollNumber) return;
-    const created: Student = {
-      id: `std_${Date.now()}`,
-      rollNumber: newStudent.rollNumber,
-      name: newStudent.name,
-      email: newStudent.email || `${newStudent.name.toLowerCase().replace(" ", ".")}@argus.edu`,
-      department: newStudent.department,
-      enrollmentDate: new Date().toISOString().split("T")[0],
-      status: "ENROLLED",
-      maskVariantsCount: 15,
-      hasVectorEmbedding: true,
-      recognitionAccuracy: 97.5,
-    };
-    setStudents([created, ...students]);
-    setIsAddModalOpen(false);
-    setNewStudent({ name: "", rollNumber: "", email: "", department: "Computer Science & Eng." });
+  const remove = useMutation({
+    mutationFn: (studentId: string) => studentService.deleteStudent(studentId),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["students"] }),
+  });
+
+  const rows = students.data?.items ?? [];
+  const nextCursor = students.data?.next_cursor ?? null;
+
+  const roomName = (id: string | null) =>
+    classrooms.data?.items.find((room) => room.class_id === id)?.class_name ?? "Unassigned";
+
+  const resetPaging = (value: string) => {
+    setClassId(value);
+    setCursors([undefined]);
+    setPageIndex(0);
   };
 
-  const handleDeleteStudent = (id: string) => {
-    setStudents(students.filter((s) => s.id !== id));
+  const goForward = () => {
+    if (nextCursor === null) return;
+    setCursors((previous) => {
+      const next = previous.slice(0, pageIndex + 1);
+      next.push(nextCursor);
+      return next;
+    });
+    setPageIndex((index) => index + 1);
   };
 
   return (
     <div className="space-y-7">
-      {/* Page Header */}
       <div className="flex items-start justify-between">
         <div>
           <h1 className="text-[22px] font-bold text-[var(--ink)] tracking-tight leading-tight">Students</h1>
-          <p className="text-[12.5px] text-[var(--ink-faint)] mt-0.5">{filtered.length} of {students.length} enrolled</p>
+          <p className="text-[12.5px] text-[var(--ink-faint)] mt-0.5">
+            {rows.length} on this page{nextCursor !== null ? ", more available" : ""}
+          </p>
         </div>
-        <Button onClick={() => setIsAddModalOpen(true)} variant="primary" size="sm">
-          <UserPlus className="h-3.5 w-3.5 mr-1.5" />
-          Add Student
-        </Button>
+        <Link href="/enrollment">
+          <Button variant="primary" size="sm">
+            <UserPlus className="h-3.5 w-3.5 mr-1.5" />
+            Enroll Student
+          </Button>
+        </Link>
       </div>
 
-      {/* Filters */}
-      <div className="flex flex-col sm:flex-row items-center gap-3">
-        <div className="relative w-full sm:w-72">
-          <Search className="absolute left-3 top-2 h-4 w-4 text-[var(--ink-faint)]" />
-          <Input
-            placeholder="Search by name or roll number..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className="pl-9"
-          />
-        </div>
-        <Select value={deptFilter} onChange={(e) => setDeptFilter(e.target.value)} className="w-52">
-          <option value="ALL">All Departments</option>
-          <option value="Computer Science & Eng.">Computer Science & Eng.</option>
-          <option value="Artificial Intelligence">Artificial Intelligence</option>
-          <option value="Electronics & Comm.">Electronics & Comm.</option>
-        </Select>
-      </div>
+      <Select value={classId} onChange={(event) => resetPaging(event.target.value)} className="w-64">
+        <option value="">All classrooms</option>
+        {classrooms.data?.items.map((room) => (
+          <option key={room.class_id} value={room.class_id}>
+            {room.class_name} · {room.department}
+          </option>
+        ))}
+      </Select>
 
-      {/* Table */}
-      <div className="rounded-xl border border-[var(--stone-200)] overflow-hidden shadow-[0_1px_3px_rgba(15,27,53,0.05)]">
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>Roll No</TableHead>
-              <TableHead>Student</TableHead>
-              <TableHead>Department</TableHead>
-              <TableHead>Mask Variants</TableHead>
-              <TableHead>Index Status</TableHead>
-              <TableHead className="text-right">Action</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {filtered.map((student) => (
-              <TableRow key={student.id}>
-                <TableCell className="font-mono text-[11.5px] text-[var(--ink-faint)]">
-                  {student.rollNumber}
-                </TableCell>
-                <TableCell>
-                  <div className="flex items-center gap-2.5">
-                    <Avatar name={student.name} size="sm" />
-                    <div>
-                      <p className="font-medium text-[12.5px] text-[var(--ink)]">{student.name}</p>
-                      <p className="text-[10.5px] text-[var(--ink-faint)]">{student.email}</p>
-                    </div>
-                  </div>
-                </TableCell>
-                <TableCell className="text-[12px] text-[var(--ink-muted)]">{student.department}</TableCell>
-                <TableCell className="font-semibold text-[12.5px] text-[var(--ink)]">{student.maskVariantsCount}</TableCell>
-                <TableCell>
-                  <Badge variant={student.hasVectorEmbedding ? "present" : "secondary"}>
-                    {student.hasVectorEmbedding ? "Indexed" : "Pending"}
-                  </Badge>
-                </TableCell>
-                <TableCell className="text-right">
-                  <button
-                    onClick={() => handleDeleteStudent(student.id)}
-                    className="text-[var(--ink-faint)] hover:text-[var(--status-absent)] transition-colors p-1 rounded"
-                    title="Remove Student"
-                  >
-                    <Trash2 className="h-3.5 w-3.5" />
-                  </button>
-                </TableCell>
+      {remove.error ? <ErrorNotice error={remove.error} /> : null}
+
+      <AsyncState
+        isLoading={students.isLoading}
+        error={students.error}
+        isEmpty={rows.length === 0}
+        emptyLabel="No students on the roster yet."
+      >
+        <div className="rounded-xl border border-[var(--stone-200)] overflow-hidden shadow-[0_1px_3px_rgba(15,27,53,0.05)]">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Roll No</TableHead>
+                <TableHead>Student</TableHead>
+                <TableHead>Classroom</TableHead>
+                <TableHead>Enrolled</TableHead>
+                <TableHead className="text-right">Action</TableHead>
               </TableRow>
-            ))}
-          </TableBody>
-        </Table>
-      </div>
+            </TableHeader>
+            <TableBody>
+              {rows.map((student) => (
+                <TableRow key={student.student_id}>
+                  <TableCell className="font-mono text-[11.5px] text-[var(--ink-faint)] tabular-nums">
+                    {student.roll_no}
+                  </TableCell>
+                  <TableCell>
+                    <div className="flex items-center gap-2.5">
+                      <Avatar name={student.student_name} size="sm" />
+                      <span className="font-medium text-[12.5px] text-[var(--ink)]">
+                        {student.student_name}
+                      </span>
+                    </div>
+                  </TableCell>
+                  <TableCell className="text-[12px] text-[var(--ink-muted)]">
+                    {roomName(student.class_id)}
+                  </TableCell>
+                  <TableCell className="font-mono text-[11.5px] text-[var(--ink-faint)]">
+                    {new Date(student.created_at).toLocaleDateString()}
+                  </TableCell>
+                  <TableCell className="text-right">
+                    <button
+                      onClick={() => remove.mutate(student.student_id)}
+                      className="text-[var(--ink-faint)] hover:text-[var(--status-absent)] transition-colors p-1 rounded"
+                      title="Remove student, templates and attendance"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </button>
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
 
-      {/* Add Student Modal */}
-      <Dialog open={isAddModalOpen} onOpenChange={setIsAddModalOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Register Student</DialogTitle>
-          </DialogHeader>
-          <div className="space-y-4 py-2">
-            <div className="space-y-1.5">
-              <label className="text-[12px] font-semibold text-[var(--ink)]">Full Name</label>
-              <Input
-                placeholder="Full name"
-                value={newStudent.name}
-                onChange={(e) => setNewStudent({ ...newStudent, name: e.target.value })}
-              />
-            </div>
-            <div className="space-y-1.5">
-              <label className="text-[12px] font-semibold text-[var(--ink)]">Roll Number</label>
-              <Input
-                placeholder="e.g. CS2024001"
-                value={newStudent.rollNumber}
-                onChange={(e) => setNewStudent({ ...newStudent, rollNumber: e.target.value })}
-              />
-            </div>
-            <div className="space-y-1.5">
-              <label className="text-[12px] font-semibold text-[var(--ink)]">Department</label>
-              <Select
-                value={newStudent.department}
-                onChange={(e) => setNewStudent({ ...newStudent, department: e.target.value })}
+          <div className="px-5 py-3 flex items-center justify-between border-t border-[var(--stone-200)]">
+            <span className="text-[11.5px] text-[var(--ink-faint)]">Page {pageIndex + 1}</span>
+            <div className="flex items-center gap-1">
+              <Button
+                variant="outline"
+                size="icon"
+                disabled={pageIndex === 0}
+                onClick={() => setPageIndex((index) => Math.max(0, index - 1))}
               >
-                <option value="Computer Science & Eng.">Computer Science & Eng.</option>
-                <option value="Artificial Intelligence">Artificial Intelligence</option>
-                <option value="Electronics & Comm.">Electronics & Comm.</option>
-              </Select>
+                <ChevronLeft className="h-3.5 w-3.5" />
+              </Button>
+              <Button variant="outline" size="icon" disabled={nextCursor === null} onClick={goForward}>
+                <ChevronRight className="h-3.5 w-3.5" />
+              </Button>
             </div>
           </div>
-          <DialogFooter>
-            <Button variant="ghost" size="sm" onClick={() => setIsAddModalOpen(false)}>Cancel</Button>
-            <Button variant="primary" size="sm" onClick={handleCreateStudent}>Register</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+        </div>
+      </AsyncState>
     </div>
   );
 }

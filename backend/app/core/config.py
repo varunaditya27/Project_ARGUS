@@ -12,7 +12,7 @@ from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 CsvList = Annotated[list[str], NoDecode]
 
 ChromaMode = Literal["disabled", "persistent", "http"]
-ObjectStorageMode = Literal["disabled", "r2"]
+ObjectStorageMode = Literal["disabled", "local", "r2"]
 
 DEFAULT_MASK_VARIANTS = (
     "surgical_blue",
@@ -94,12 +94,17 @@ class Settings(BaseSettings):
     chroma_search_k: int = Field(default=10, ge=1, le=200)
 
     object_storage_mode: ObjectStorageMode = "disabled"
+    storage_key_prefix: str = "enrollment"
+    # mode=local: images are written here, mounted at media_url_path, and the URL
+    # stored in students.image_url is local_public_base_url + key.
+    local_storage_path: Path = Path("./.media")
+    media_url_path: str = "/media"
+    local_public_base_url: str = "http://localhost:8000/media"
     r2_endpoint_url: str | None = None
     r2_bucket: str | None = None
     r2_access_key_id: str | None = None
     r2_secret_access_key: str | None = None
     r2_public_base_url: str | None = None
-    r2_key_prefix: str = "enrollment"
 
     @field_validator("cors_origins", "mask_variants", "onnx_providers", mode="before")
     @classmethod
