@@ -30,8 +30,7 @@ def identity_uuid(dataset, identity):
 
 
 # the 5,802-identity unmasked gallery: one UNMASKED template per person
-def unmasked_rows():
-    data = np.load(UNMASKED_PATH)
+def unmasked_rows(data):
     rows = []
     for dataset, identity, embedding in zip(data["dataset"], data["identity"], data["embedding"]):
         student_id = identity_uuid(dataset, identity)
@@ -42,8 +41,7 @@ def unmasked_rows():
 # masked variants for the 400-identity eval subset, added as extra templates for those same people.
 # an identity can have several source photos masked with the same mask_type - keep one per
 # (identity, mask_type), same tie-break convention as evaluation/eval_sets.py's gallery picking
-def masked_rows():
-    data = np.load(EVAL_PATH)
+def masked_rows(data):
     masked = data["is_masked"] == 1
     chosen = {}
     for dataset, identity, mask_type, path, embedding in zip(
@@ -78,7 +76,7 @@ def seed(chroma_path):
     client = chromadb.PersistentClient(path=chroma_path)
     collection = client.get_or_create_collection(COLLECTION_NAME, metadata={"hnsw:space": "cosine"})
 
-    rows = unmasked_rows() + masked_rows()
+    rows = unmasked_rows(np.load(UNMASKED_PATH)) + masked_rows(np.load(EVAL_PATH))
     write_identity_map(rows)
 
     for start in range(0, len(rows), BATCH_SIZE):
