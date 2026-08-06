@@ -350,7 +350,7 @@ Stated plainly, because a README that hides these is worse than none.
 ## Team
 
 - **Varun Aditya**
-- **Rayyan Shaikh Ahmed**
+- **Rayyan Shaikh**
 - **Nidhi Mahesh**
 
 For queries, suggestions, or collaborations, please open an issue.
