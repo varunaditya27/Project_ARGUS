@@ -16,6 +16,14 @@ __pycache__/
 .ruff_cache/
 .chroma/
 .chroma-bench/
+.uv-cache/
+
+# Local virtualenvs (any name)
+myenv/
+.runvenv/
+
+# Locally stored enrollment images (ARGUS_OBJECT_STORAGE_MODE=local)
+backend/.media/
 
 # Editors / OS
 .DS_Store

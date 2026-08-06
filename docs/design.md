@@ -362,7 +362,16 @@ matching:
   minimum_margin: null
 ```
 
-The values remain `null` until real validation has been completed.
+The defaults are `null`, and they stay `null` until real validation has been
+completed. While any of the three is unset, the decision layer cannot return
+`MATCH` at all — see `docs/architecture.md` §5.1.
+
+Calibration has since been run against LFW (400 identities) and MFR2 (53
+identities) under the 1:N identification protocol this system actually uses. The
+resulting values — `match_threshold: 0.35`, `review_threshold: 0.25`,
+`minimum_margin: 0.06` — are set in `backend/.env`, with the derivation and its
+caveats in `docs/benchmarks.md` section 4. They are a validated starting point
+for a real cohort, not a universal constant.
 
 ## MATCH
 

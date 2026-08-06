@@ -1,357 +1,362 @@
 # Project ARGUS
 
-> **Masked Face Recognition using Unmasked Enrollment Gallery**
+> **Masked Face Recognition using an Unmasked Enrollment Gallery**
 
-Project ARGUS is a computer vision system focusing on recognizing individuals wearing face masks using only their previously enrolled **unmasked facial images**.
+Project ARGUS recognises people wearing face masks using only their previously
+enrolled **unmasked** facial images, and turns those recognitions into classroom
+attendance.
 
-Unlike conventional face recognition systems that expect both gallery and probe images to be unobstructed, ARGUS addresses the practical scenario where the enrollment database contains unmasked faces while the live input contains partially occluded faces due to masks.
+Conventional face recognition expects both the gallery and the probe to be
+unobstructed. ARGUS addresses the practical case where the enrollment database
+holds unmasked faces while the live camera sees partially occluded ones — and
+wraps that recogniser in a complete attendance system: roster management, live
+capture, absence derivation and reporting.
 
-The primary objective is to minimize the recognition performance gap introduced by facial occlusions while maintaining a scalable and real-time recognition pipeline.
-
----
-
-## Problem Statement
-
-Modern face recognition systems achieve excellent accuracy when both the enrollment gallery and live probe images contain unobstructed faces. However, their performance degrades significantly when the lower half of the face is occluded by a mask.
-
-Project ARGUS aims to bridge this gap by building a recognition pipeline capable of matching masked probe images against an unmasked gallery while maintaining high identification accuracy.
-
----
-
-## Objectives
-
-- Build a baseline face recognition pipeline using pretrained models.
-- Generate masked facial datasets from unmasked images.
-- Evaluate the impact of facial occlusion on recognition accuracy.
-- Improve masked face recognition through robust training strategies.
-- Demonstrate real-time masked face recognition using a webcam.
+**Two things ship in this repository:** a research pipeline that measures how well
+masked recognition actually works, and a production-shaped system (FastAPI +
+PostgreSQL + ChromaDB + Next.js) that uses it.
 
 ---
 
-# Features
+## Contents
 
-- Unmasked face enrollment
-- Automatic face detection and alignment
-- Face embedding generation
-- Embedding database
-- Similarity-based face matching
-- Synthetic mask generation pipeline
-- Real-time webcam recognition
-- Performance evaluation dashboard
-- Extensible architecture for future research
+- [Results](#results) — measured accuracy, honestly framed
+- [Quick start](#quick-start) — running the whole stack
+- [How it works](#how-it-works) — the pipeline end to end
+- [Repository layout](#repository-layout)
+- [Documentation](#documentation)
+- [Technology stack](#technology-stack)
+- [Current status](#current-status)
+- [Known limitations](#known-limitations)
 
 ---
 
-# System Overview
+## Results
+
+Baseline: one unmasked embedding per identity as gallery, **zero training**.
+
+| Dataset | Unmasked→unmasked | Masked→unmasked | Generalization gap |
+|---|---|---|---|
+| LFW subset (400 identities, synthetic masks) | 96.58% | 96.26% | 0.32 pp |
+| MFR2 (53 identities, real masks) | 100% | 98.83% | 1.17 pp |
+
+Multi-template gallery matching — one extra template per (identity, mask type),
+still zero training:
+
+| Dataset | Baseline rank-1 | Multi-template rank-1 | Gain |
+|---|---|---|---|
+| LFW subset | 96.26% | 96.61% | +0.35 pp |
+| MFR2 | 98.83% | 100% | +1.17 pp |
+
+**Full-scale verification.** Held-out masked probes queried against the complete
+5,802-identity demo gallery (8,700 templates) in the live ChromaDB —
+a harder test than the above, since every other enrolled identity is a potential
+wrong answer: **2,688 / 2,797 = 96.1%** correctly resolved.
+
+> **Read this honestly.** ArcFace/`buffalo_l` is already strongly mask-robust out
+> of the box — this is *not* the ~38% TPR drop MaskTheFace's own paper reports for
+> FaceNet. The finding is not "we closed a large gap"; it is **"the gap was
+> already small, multi-template matching closed most of what remained, and
+> RWMFD-style masking is measurably harder than MaskTheFace's"** (both RWMFD
+> variants sit 3.7–4.0 pp below every MaskTheFace variant, consistently, across a
+> full pipeline re-run). That is a genuine finding, not a disappointing one.
+
+Full breakdowns — per-mask-type numbers, ROC-AUC, TAR@FAR, and the two real bugs
+found and fixed mid-pipeline — are in
+[`evaluation/accuracy_comparison.md`](evaluation/accuracy_comparison.md) and
+[`evaluation/README.md`](evaluation/README.md).
+
+---
+
+## Quick start
+
+### Prerequisites
+
+- **Python 3.11+** (the code uses `enum.StrEnum`)
+- **Node.js 20+**
+- **PostgreSQL 14+**
+- The InsightFace **`buffalo_l`** ONNX pack
+
+### 1. Model weights
+
+The weights are **not in the repository** — the pack is ~197 MB and
+`w600k_r50.onnx` alone exceeds GitHub's 100 MB per-file limit, so `models/` is
+git-ignored. Download the pack and unpack it so the root looks like this:
+
+```text
+models/buffalo_l/
+├── det_10g.onnx        detection + 5 landmarks   (used)
+├── w600k_r50.onnx      512-d embedding           (used)
+├── 2d106det.onnx       dense landmarks           (not used)
+└── genderage.onnx      age/gender                (not used)
+```
+
+`2d106det.onnx` is unused because the mask synthesiser works in the aligned
+canonical frame where the geometry is already known; `genderage.onnx` is not an
+attendance concern.
+
+### 2. Backend
+
+```bash
+cd backend
+python3.11 -m venv .venv && source .venv/bin/activate   # .venv/Scripts/activate on Windows
+pip install -r requirements-dev.txt                     # requirements.txt for runtime only
+cp .env.example .env                                    # then fill in ARGUS_DATABASE_URL
+alembic upgrade head
+uvicorn app.main:app --reload
+```
+
+Open <http://localhost:8000/docs>. The service **starts even when
+half-configured** — every endpoint whose dependency is missing answers `503`
+naming the exact environment variable to set, so `GET /health` and `GET /models`
+tell you precisely what is left to wire up.
+
+### 3. Frontend
+
+```bash
+cd frontend
+npm install
+cp .env.local.example .env.local        # then point NEXT_PUBLIC_API_URL at the backend
+npm run dev                             # http://localhost:3001
+```
+
+The backend's `ARGUS_CORS_ORIGINS` must include that origin:
+
+```bash
+ARGUS_CORS_ORIGINS=http://localhost:3001
+```
+
+### 4. Tests
+
+```bash
+cd backend && pytest        # 82 tests, no external services needed
+pytest tests/               # 51 tests over the research pipeline, from the repo root
+```
+
+The backend suite runs without `onnxruntime`, `chromadb` or PostgreSQL installed —
+the vision stack sits behind Protocols and is substituted with fakes.
+
+---
+
+## How it works
 
 ```mermaid
 flowchart LR
 
 subgraph Enrollment
-A[Unmasked Images]
-B[Face Detection]
-C[Face Alignment]
-D[Embedding Extraction]
-E[(Embedding Database)]
+A[Unmasked Image]
+B[SCRFD Detection]
+C[5-point Alignment]
+D[Mask Synthesis]
+E[ArcFace Embedding]
+F[(ChromaDB<br/>7 templates/student)]
 end
 
 subgraph Recognition
-F[Live Camera]
-G[Face Detection]
-H[Face Alignment]
-I[Embedding Extraction]
-J[Recognition Enhancement]
+G[Camera Frame]
+H[SCRFD Detection]
+I[5-point Alignment]
+J[ArcFace Embedding]
 K[Similarity Search]
-L[Prediction]
+L{decide}
 end
 
-A --> B
-B --> C
-C --> D
-D --> E
+subgraph Attendance
+M[Observation Buffer<br/>coalesced]
+N[(PostgreSQL)]
+end
 
-F --> G
-G --> H
-H --> I
-I --> J
-J --> K
-E --> K
+A --> B --> C --> D --> E --> F
+G --> H --> I --> J --> K
+F --> K
 K --> L
+L -->|MATCH only| M
+M -->|every interval| N
+L -->|HUMAN_REVIEW / UNKNOWN| O[Operator UI<br/>nothing written]
 ```
 
----
+Three design decisions define the system:
 
-# System Modules
+**1. Enrollment stores masked variants, not just the bare photo.** One unmasked
+template plus one per configured mask variant — 7 per student by default — so a
+masked probe is compared against masked templates rather than only against a bare
+face.
 
-## 1. Enrollment Module
+**2. Only a `MATCH` writes attendance.** The decision layer returns `MATCH`,
+`HUMAN_REVIEW` or `UNKNOWN`. A nearest neighbour never implies a match (an index
+always returns *something*, even for a stranger), a small margin between the top
+two identities forces review, and while the thresholds are uncalibrated `MATCH`
+is unreachable by construction. No attendance is better than wrong attendance.
 
-Responsible for registering new users into the gallery.
+**3. Attendance accrues during the lecture; absence is derived once, at the end.**
+Recognitions are coalesced in memory and flushed to PostgreSQL once per interval,
+so the register fills live. On close, one anti-join statement marks every roster
+member without a row as `Absent`. Cost tracks roster size, not detection count.
 
-Responsibilities
+A per-frame miss rate of ~26% sounds fatal but is not, because attendance samples
+every interval: a student present for 20 intervals is missed with probability
+~1.5e-12. The design converts a mediocre per-frame recogniser into a reliable
+per-lecture one by sampling repeatedly rather than by loosening thresholds.
 
-- Capture or import unmasked facial images
-- Detect and align faces
-- Generate face embeddings
-- Store embeddings in the database
-
----
-
-## 2. Face Detection Module
-
-Detects facial regions from images or video frames before feature extraction.
-
-Responsibilities
-
-- Face localization
-- Landmark detection
-- Face alignment
-- Image normalization
+Full detail — layering, the SQL, the decision policy, scaling behaviour — is in
+[`docs/architecture.md`](docs/architecture.md).
 
 ---
 
-## 3. Embedding Generation Module
-
-Converts aligned facial images into numerical feature vectors.
-
-Responsibilities
-
-- Feature extraction
-- Embedding normalization
-- Identity representation
-
----
-
-## 4. Recognition Module
-
-Matches incoming probe embeddings against the enrolled gallery.
-
-Responsibilities
-
-- Similarity computation
-- Identity prediction
-- Confidence estimation
-- Unknown face rejection
-
----
-
-## 5. Evaluation Module
-
-Measures recognition performance using standard face recognition metrics.
-
-Responsibilities
-
-- Rank-1 Accuracy
-- Verification Accuracy
-- ROC Curve
-- TAR @ FAR
-- Confusion Matrix
-
----
-
-# High-Level Methodology
-
-```mermaid
-flowchart TD
-
-A[Collect Dataset]
-B[Generate Masked Images]
-C[Enrollment]
-D[Baseline Evaluation]
-E[Model Enhancement]
-F[Final Evaluation]
-G[Live Demonstration]
-
-A --> B
-A --> C
-B --> D
-C --> D
-D --> E
-E --> F
-F --> G
-```
-
----
-
-# Technology Stack
-
-| Component | Technology |
-|------------|------------|
-| Language | Python |
-| Computer Vision | OpenCV |
-| Face Detection | SCRFD (InsightFace) |
-| Face Recognition | ArcFace (InsightFace) |
-| Deep Learning | PyTorch |
-| Vector Database | ChromaDB |
-| Numerical Computing | NumPy |
-| Visualization | Matplotlib |
-| Backend | FastAPI *(planned)* |
-| Frontend | Nextjs *(planned)* |
-
----
-
-# Repository Structure
+## Repository layout
 
 ```text
 Project_ARGUS/
-
-├── datasets/
+├── backend/          FastAPI service: roster, sessions, capture, recognition
+│   ├── app/
+│   │   ├── api/          routers + typed dependencies
+│   │   ├── services/     use cases, one transaction each
+│   │   ├── repositories/ set-based SQL, keyset paging
+│   │   ├── recognition/  ports, adapters (scrfd/arcface/masks/chroma), decision
+│   │   ├── db/           engine, ORM models (== docs/db.md), integrity mapping
+│   │   └── storage/      local filesystem / Cloudflare R2
+│   ├── alembic/      0001_initial_schema == docs/db.md
+│   ├── benchmarks/   db_scale.py, vector_search.py
+│   └── tests/        82 tests
 │
-├── models/
+├── frontend/         Next.js 16 operator console (10 screens)
+│   └── src/          app/ services/ types/ components/ hooks/ store/
 │
-├── training/
+├── datasets/         raw downloads, processed output, vendored masking tools
+│   └── masking/      MaskTheFace + RWMFD + our orchestration scripts
+├── embeddings/       batch embedding extraction -> .npz
+├── evaluation/       rank-1 / ROC / TAR@FAR, threshold calibration, benchmark tool
+├── enrollment/       seeds the 5,802-identity demo gallery into ChromaDB
+├── tests/            51 tests over the research pipeline
 │
-├── evaluation/
-│
-├── inference/
-│
-├── embeddings/
-│
-├── backend/
-│
-├── frontend/
-│
-├── docs/
-│
+├── models/           buffalo_l ONNX pack (git-ignored — fetch it, see above)
+├── samples/          example roster CSV + photo ZIP for bulk import
+├── docs/             architecture, API, database, benchmarks, design
 ├── README.md
-│
-└── requirements.txt
+└── requirements.txt  research pipeline only; backend pins its own
 ```
 
+The research half (`datasets/`, `embeddings/`, `evaluation/`, `enrollment/`,
+`tests/`) and the serving half (`backend/`, `frontend/`) share the model weights
+and the ChromaDB collection schema and nothing else — neither imports the other.
+
 ---
 
-# Backend
-
-The attendance backend (FastAPI + PostgreSQL + ChromaDB) lives in [`backend/`](backend/). It implements the schema in [`docs/db.md`](docs/db.md) exactly, captures attendance in intervals while a session is active, and derives absence when the session is closed.
+## Documentation
 
 | Document | Purpose |
-|----------|---------|
-| [`backend/README.md`](backend/README.md) | Running the service, layout, how to plug in the model adapters |
-| [`docs/database_setup.md`](docs/database_setup.md) | Database connections, schema mapping decisions, ChromaDB and R2 setup |
-| [`docs/api_integration.md`](docs/api_integration.md) | HTTP/WebSocket contract for the frontend and recognition clients |
-| [`docs/benchmarks.md`](docs/benchmarks.md) | Measured attendance and vector-search performance at 20 000 students |
-
-The recognition components run on `onnxruntime` against the InsightFace `buffalo_l` pack (SCRFD detection, ArcFace embeddings, geometric mask synthesis, ChromaDB index). Any component without a configured model file answers `503` naming the missing setting; the backend never returns fabricated recognition results.
-
----
-
-# Datasets
-
-The project uses publicly available datasets for training and evaluation.
-
-| Dataset | Purpose |
-|----------|----------|
-| LFW | Baseline face recognition |
-| MFR2 | Masked face evaluation |
-| RMFRD / RMFD | Real masked face recognition |
-| MaskedFace-Net | Synthetic masked training |
-| MaskTheFace | Synthetic mask generation |
+|---|---|
+| [`docs/architecture.md`](docs/architecture.md) | **Start here.** How the codebase fits together: layering, the recognition and attendance paths, stores, scaling, testing, limitations |
+| [`docs/api_integration.md`](docs/api_integration.md) | HTTP/WebSocket contract for frontends and recognition clients |
+| [`docs/database_setup.md`](docs/database_setup.md) | Connection strings, schema mapping decisions, ChromaDB and R2 setup |
+| [`docs/db.md`](docs/db.md) | The schema contract — mapped 1:1, no extra tables |
+| [`docs/design.md`](docs/design.md) | Detailed design and decision rationale |
+| [`docs/registration_import.md`](docs/registration_import.md) | Bulk roster registration from CSV + ZIP |
+| [`docs/benchmarks.md`](docs/benchmarks.md) | Measured attendance and vector-search performance at 20,000 students |
+| [`docs/scalability_design.md`](docs/scalability_design.md) | Polyglot persistence, buffering and DI rationale |
+| [`docs/testplan.md`](docs/testplan.md) | Acceptance test plan |
+| [`docs/third_party.md`](docs/third_party.md) | Third-party libraries and tools |
+| [`backend/README.md`](backend/README.md) | Running the service, layout, plugging in model adapters |
+| [`frontend/README.md`](frontend/README.md) | Running the console, screens, API usage |
+| [`evaluation/README.md`](evaluation/README.md) | Methodology, per-mask-type results, bugs found |
+| [`enrollment/README.md`](enrollment/README.md) | How the demo gallery was seeded and verified |
+| [`datasets/README.md`](datasets/README.md) | Dataset provenance and the masking pipeline |
 
 ---
 
-# Proposed Enhancements
+## Technology stack
 
-The baseline pipeline establishes masked face recognition performance using a pretrained ArcFace model with similarity-based matching against an unmasked enrollment gallery. Building upon this baseline, Project ARGUS proposes the following enhancement to improve recognition performance under facial occlusion.
+| Component | Technology |
+|---|---|
+| Backend | FastAPI, Pydantic v2, Uvicorn |
+| Database | PostgreSQL 14+, SQLAlchemy 2 (async), Alembic |
+| Vector database | ChromaDB (cosine) |
+| Object storage | Cloudflare R2, or a local directory in development |
+| Face detection | SCRFD (`det_10g.onnx`) via `onnxruntime` |
+| Face recognition | ArcFace (`w600k_r50.onnx`, 512-d) via `onnxruntime` |
+| Mask synthesis | Geometric, in the aligned frame (serving) · MaskTheFace + RWMFD (research) |
+| Computer vision | OpenCV, NumPy |
+| Evaluation | scikit-learn, Matplotlib |
+| Frontend | Next.js 16 (App Router), React 19, TypeScript |
+| UI | Tailwind CSS v4, Radix UI, TanStack Query, Zustand, Recharts |
 
----
-
-## 1. Fine-Tuning the Recognition Backbone
-
-As a second enhancement, the pretrained ArcFace model will be fine-tuned using a combination of unmasked and synthetically masked facial images.
-
-Synthetic masked samples will be generated using MaskTheFace to expose the model to diverse mask types, colors, and occlusion patterns during training. Fine-tuning aims to improve the robustness of the learned facial representations by encouraging the model to focus on discriminative features that remain visible under occlusion.
-
-The performance of the fine-tuned model will be evaluated against the baseline to quantify the reduction in the masked-to-unmasked generalization gap.
-
-**Expected Benefits**
-
-- Improved robustness to facial occlusions
-- Better feature extraction from the visible upper facial region
-- Reduced performance degradation when matching masked probe images against an unmasked gallery
-- Improved recognition accuracy across varying mask styles and conditions
+Serving runs on `onnxruntime` alone — **no torch and no `insightface` package at
+serving time**. Those are research-pipeline dependencies only.
 
 ---
 
-Both enhancements will be evaluated independently against the baseline system using standard face recognition metrics, including Rank-1 Identification Accuracy, ROC-AUC, TAR@FAR, and the masked-to-unmasked generalization gap.
-
----
-
-# Evaluation Strategy
-
-The system will be evaluated in two stages.
-
-## Baseline
-
-- Unmasked Gallery → Unmasked Probe
-
-This establishes the reference performance of the recognition pipeline.
-
----
-
-## Masked Evaluation
-
-- Unmasked Gallery → Masked Probe
-
-This measures the degradation caused by facial occlusion.
-
----
-
-## Metrics
-
-- Rank-1 Identification Accuracy
-- 1:1 Verification Accuracy
-- ROC-AUC
-- TAR @ FAR
-- Generalization Gap
-
----
-
-# Future Scope
-
-- Occlusion-aware embedding learning
-- Periocular feature modeling
-- Dual-stream feature extraction
-- Attention-based recognition
-- Edge deployment
-- Large-scale watchlist search
-- Multi-camera integration
-
----
-
-# Current Status
+## Current status
 
 | Module | Status |
-|----------|--------|
-| Literature Study | Done |
-| System Design | Done |
-| Dataset Study | Done |
-| Architecture Design | Done |
-| Attendance Backend | Done |
-| Model Adapters (SCRFD / ArcFace / mask synthesis) | Done |
-| Baseline Pipeline | In Progress |
-| Evaluation Pipeline | In Progress |
-| Threshold Calibration | Planned |
-| Enhancement Pipeline | Planned |
-| Frontend | Planned |
-| Live Demo | Planned |
+|---|---|
+| Literature study, system design, dataset study | Done |
+| Synthetic masking pipeline (MaskTheFace + RWMFD) | Done |
+| Baseline evaluation (rank-1, ROC-AUC, TAR@FAR) | Done |
+| Multi-template gallery matching | Done |
+| Attendance backend (roster, sessions, capture, absence) | Done |
+| Model adapters (SCRFD / ArcFace / mask synthesis / Chroma) | Done |
+| Bulk roster import (CSV + ZIP) | Done |
+| Demo gallery seeded (5,802 identities, 8,700 templates) | Done · 96.1% verified |
+| Threshold calibration | Done on LFW/MFR2 — **re-calibrate for a real cohort** |
+| Frontend operator console (10 screens) | Done |
+| Offline runs (recorded video, image archive) | Done |
+| Benchmarks at 20,000 students | Done |
+| Masked-face **detection** recall | **Open — see limitations** |
+| ArcFace fine-tuning | Explored, then abandoned (near-ceiling baseline) |
 
 ---
 
-# Team
+## Known limitations
 
-Project ARGUS is being developed by:
+Stated plainly, because a README that hides these is worse than none.
+
+- **Masked-face detection recall is the real bottleneck, not recognition.** A
+  mask occludes half the face, so SCRFD scores a masked student far lower than a
+  bare one. Measured on 72 masked faces at classroom scale (~140 px): the library
+  default gate of 0.50 detects only **13.9%**; the configured 0.20 detects
+  **69.4%**. A face that is never *detected* produces no observation, so a student
+  who sat through the whole lecture silently falls through to `Absent`. Lowering
+  the gate cannot create false attendance — a detection still has to clear the
+  match threshold, and 0 wrong matches were measured at 0.20 — but 69.4% is a
+  mitigation, not a fix. The real fix is enrolling masked templates per student:
+  data, not code.
+- **Thresholds are dataset-derived.** Calibrated on LFW/MFR2 with synthetic masks,
+  not on a real cohort, camera or mask-wearing habits. Re-calibrate before
+  production.
+- **No authentication.** `docs/db.md` declares no users table, so the API is
+  unauthenticated and must sit behind a gateway or a private network.
+- **The attendance buffer is single-process.** Multiple workers each buffer their
+  own observations — correct (they converge via the same merge rule) but
+  duplicated — and a hard process kill loses at most one interval of un-flushed
+  observations.
+- **`roll_no` is an integer and globally unique**, per the schema, so
+  alphanumeric roll numbers like `CS2024001` cannot be stored and two classrooms
+  cannot reuse a number.
+- **Deleting a student destroys their attendance history**, because the foreign
+  keys carry no `ON DELETE` rule and the row cannot go otherwise.
+
+---
+
+## Future scope
+
+- Enrolling real masked templates per student (the detection-recall fix)
+- Occlusion-aware embedding learning; periocular feature modelling
+- Dual-stream feature extraction; attention-based recognition
+- Redis-backed capture buffer for horizontal scaling
+- Edge deployment, multi-camera integration, large-scale watchlist search
+
+---
+
+## Team
 
 - **Varun Aditya**
 - **Rayyan Shaikh Ahmed**
 - **Nidhi Mahesh**
 
----
-
-## Contact
-
-For queries, suggestions, or collaborations, please open an issue in this repository.
+For queries, suggestions, or collaborations, please open an issue.
 
 ---
 
-# License
+## License
 
 This repository is intended for academic and research purposes.

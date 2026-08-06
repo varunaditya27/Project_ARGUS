@@ -56,12 +56,18 @@ synthesised geometrically. Whether they are *live* depends on deployment - the
 model files must be present and `ARGUS_MODEL_ROOT` set, and Chroma must be
 configured. Until then those endpoints answer `503 dependency_not_configured`.
 
-**The one thing you must handle in the UI regardless:** the decision thresholds
-in `docs/design.md` are still `null`, and attendance is only written for a
-`MATCH`. A `MATCH` is impossible while the thresholds are uncalibrated, so
-recognition returns `HUMAN_REVIEW` and nothing is recorded automatically. This is
-deliberate - no attendance is better than attendance based on a guessed
-threshold. See `docs/benchmarks.md` section 4 for how the numbers get set.
+**The one thing you must handle in the UI regardless:** attendance is only ever
+written for a `MATCH`, and whether a `MATCH` is reachable at all depends on
+deployment. The three decision thresholds default to `null`, and while any of
+them is unset the decision layer can only return `HUMAN_REVIEW` or `UNKNOWN`, so
+nothing is recorded automatically. This is deliberate - no attendance is better
+than attendance based on a guessed threshold.
+
+`backend/.env.example` ships them empty; the checked-in local `.env` sets
+calibrated values (`0.35` / `0.25` / `0.06`, derived from LFW+MFR2 - see
+`docs/benchmarks.md` section 4). Never assume which state you are talking to:
+read `GET /models`, treat `HUMAN_REVIEW` as a first-class outcome, and show
+`reason` when it happens.
 
 Poll `GET /models` to find out what is live; it is the single source of truth
 and needs no redeploy of the frontend:
@@ -74,10 +80,14 @@ and needs no redeploy of the frontend:
     {"name": "mask_synthesizer", "configured": true, "detail": "variants=['surgical_blue', ...]"},
     {"name": "template_index", "configured": false, "detail": "not configured; set ARGUS_CHROMA_MODE=persistent|http"}
   ],
-  "thresholds": {"match_threshold": null, "review_threshold": null, "minimum_margin": null},
+  "thresholds": {"match_threshold": 0.35, "review_threshold": 0.25, "minimum_margin": 0.06},
   "recognition_ready": false
 }
 ```
+
+`recognition_ready` is `false` in that example because `template_index` is not
+configured, even though the thresholds are calibrated - it takes *both*.
+`thresholds` values are `null` on a deployment that has not calibrated them.
 
 `recognition_ready` is the single boolean to gate the UI on: it is true only when
 every component is configured *and* the thresholds are calibrated.
@@ -324,7 +334,7 @@ server. Both routes return the same shape:
   "processed": 240,              // frames sampled, or images read from the archive
   "skipped": 3,                  // undecodable entries
   "faces_detected": 812,
-  "matched": 0,                  // 0 while the thresholds are uncalibrated
+  "matched": 0,                  // 0 if the thresholds are uncalibrated
   "human_review": 812,
   "unknown": 0,
   "attendance_observations": 0   // distinct students handed to the capture buffer

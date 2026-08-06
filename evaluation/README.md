@@ -110,8 +110,17 @@ of what a masked probe looks like.
 
 ## What's not done yet
 
-- **Threshold calibration** - `match_threshold` / `review_threshold` in
-  `docs/design.md` are still null. Calibrate real values off the ROC
-  curve now that both evaluation modes have numbers.
-- **Fine-tuning** - explored, then abandoned given the phase time budget
-  (see `CLAUDE.md`). Not revisited.
+- **Threshold calibration** - **done.** `evaluation/calibrate_thresholds.py`
+  runs the derivation, and `backend/.env` now sets `0.35` / `0.25` / `0.06`.
+  Read `docs/benchmarks.md` section 4 before reusing those numbers: they come
+  from the 1:N identification protocol against a 10 000-template gallery, while
+  `calibrate_thresholds.py` itself reports a 1:1 verification threshold (0.1439)
+  that false-accepts 96% of probes under 1:N. Protocol mismatch, not a better
+  number.
+- **Masked-face detection recall** - the open problem, and it is a *detection*
+  problem, not a recognition one. SCRFD at its default 0.50 score gate detects
+  only 13.9% of masked faces at classroom scale; the backend now runs at 0.20
+  (69.4%). A face that is never detected produces no observation, so a present
+  student silently becomes `Absent`. See `docs/architecture.md` section 5.3.
+- **Fine-tuning** - explored, then abandoned given the phase time budget.
+  Not revisited.

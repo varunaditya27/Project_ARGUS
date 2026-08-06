@@ -5,6 +5,7 @@ lecture sessions, interval attendance capture, absence derivation, and the
 recognition endpoints backed by the InsightFace `buffalo_l` ONNX pack.
 
 - Schema contract: [`docs/db.md`](../docs/db.md) - mapped 1:1, no extra tables
+- **How it all fits together: [`docs/architecture.md`](../docs/architecture.md)**
 - Setup and schema decisions: [`docs/database_setup.md`](../docs/database_setup.md)
 - HTTP contract: [`docs/api_integration.md`](../docs/api_integration.md)
 - Measured behaviour at 20 000 students: [`docs/benchmarks.md`](../docs/benchmarks.md)
@@ -143,10 +144,30 @@ Models load lazily and are warmed at startup, so `GET /models` reports the truth
 before the first request. A component with no model file configured stays unset
 and its endpoints answer `503` naming the missing setting - nothing is guessed.
 
-**Thresholds are still `null`**, which is the one thing standing between this and
-automatic attendance. Until all three are set, `decide()` cannot return `MATCH`,
-so nothing is auto-marked: the API returns `HUMAN_REVIEW` with that reason
-instead of inventing a threshold. See `docs/benchmarks.md`.
+Thresholds have been **calibrated** against LFW (400 identities) + MFR2 (53
+identities) under the 1:N identification protocol this system actually runs, and
+`backend/.env` sets them:
+
+| Setting | Value | Basis |
+|---|---|---|
+| `ARGUS_MATCH_THRESHOLD` | `0.35` | 0/2400 false accepts against a 10 000-template gallery |
+| `ARGUS_REVIEW_THRESHOLD` | `0.25` | ~5% of impostors reach it, so it is flagged, never auto-marked |
+| `ARGUS_MINIMUM_MARGIN` | `0.06` | 5th percentile of the top1/top2 margin on correct matches |
+
+`.env.example` still ships them empty, and that state is meaningful: until all
+three are set, `decide()` cannot return `MATCH`, so nothing is auto-marked and the
+API returns `HUMAN_REVIEW` with that reason rather than inventing a threshold.
+See `docs/benchmarks.md` section 4 for the derivation - and re-calibrate on real
+masked photos of the actual cohort before production.
+
+Detection is the remaining weak point, not recognition:
+`ARGUS_DETECTION_SCORE_THRESHOLD` is lowered to `0.20` because SCRFD scores
+masked faces far lower than bare ones (the 0.50 default detected only 13.9% of
+masked faces at classroom scale, versus 69.4% at 0.20). A face that is never
+detected produces no observation and silently becomes `Absent`. Lowering the gate
+cannot create false attendance - detections still have to clear the match
+threshold, and 0 wrong matches were measured at 0.20 - but 69.4% is a mitigation,
+not a fix. See `docs/architecture.md` section 5.3.
 
 To replace an adapter, satisfy the protocol in `app/recognition/ports.py` and
 register it in `build_recognition_stack()` in `app/recognition/stack.py`.
