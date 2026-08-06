@@ -171,6 +171,11 @@ export interface HealthResponse {
   checks: HealthCheck[];
 }
 
+export interface Camera {
+  camera_id: string;
+  label: string;
+}
+
 export interface ImportRowError {
   row: number;
   roll_no: number | null;

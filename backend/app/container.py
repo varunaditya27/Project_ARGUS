@@ -17,6 +17,7 @@ from app.core.logging import get_logger
 from app.db.session import Database, build_database
 from app.recognition.stack import RecognitionStack, build_recognition_stack
 from app.services.attendance import AttendanceService
+from app.services.camera import CameraManager, build_camera_manager
 from app.services.capture import IntervalFlusher, ObservationBuffer
 from app.services.classroom import ClassroomService
 from app.services.offline import OfflineRecognitionService
@@ -56,6 +57,7 @@ class Container:
     database: Database | None
     flusher: IntervalFlusher | None
     registry: ServiceRegistry | None
+    cameras: CameraManager
 
     @property
     def services(self) -> ServiceRegistry:
@@ -74,6 +76,7 @@ class Container:
         # Flush what is buffered, then release the pool.
         if self.flusher is not None:
             await self.flusher.stop()
+        self.cameras.shutdown()
         if self.database is not None:
             await self.database.dispose()
 
@@ -110,6 +113,7 @@ def build_container(settings: Settings) -> Container:
     buffer = ObservationBuffer(max_sessions=settings.capture_max_buffered_sessions)
     storage = build_object_storage(settings)
     database = build_database(settings)
+    cameras = build_camera_manager(settings)
 
     registry: ServiceRegistry | None = None
     flusher: IntervalFlusher | None = None
@@ -135,6 +139,7 @@ def build_container(settings: Settings) -> Container:
         database=database,
         flusher=flusher,
         registry=registry,
+        cameras=cameras,
     )
 
 

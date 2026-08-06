@@ -106,6 +106,16 @@ class Settings(BaseSettings):
     r2_secret_access_key: str | None = None
     r2_public_base_url: str | None = None
 
+    # Campus CCTV feeds, proxied as MJPEG - see app/services/camera.py. Each
+    # rtsp_url carries its own camera credentials, so it lives only in .env,
+    # never in cors_origins-style comma lists or anywhere the frontend can read it.
+    camera_steps_label: str = "Near Steps"
+    camera_steps_rtsp_url: str | None = None
+    camera_wall_label: str = "Wall Attached"
+    camera_wall_rtsp_url: str | None = None
+    camera_mjpeg_fps: float = Field(default=8.0, gt=0, le=30)
+    camera_reconnect_seconds: float = Field(default=5.0, gt=0)
+
     @field_validator("cors_origins", "mask_variants", "onnx_providers", mode="before")
     @classmethod
     def _split_csv(cls, value: object) -> object:

@@ -11,6 +11,7 @@ from app.container import Container
 from app.core.errors import DependencyNotConfiguredError
 from app.schemas.common import DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE
 from app.services.attendance import AttendanceService
+from app.services.camera import CameraManager
 from app.services.classroom import ClassroomService
 from app.services.offline import OfflineRecognitionService
 from app.services.recognition import RecognitionService
@@ -61,6 +62,10 @@ def roster_import(container: ContainerDep) -> RosterImportService:
     return container.services.roster_import
 
 
+def cameras(container: ContainerDep) -> CameraManager:
+    return container.cameras
+
+
 def object_storage(container: ContainerDep) -> ObjectStorage:
     # Needs no database, so it is resolved from the container directly.
     if container.storage is None:
@@ -85,10 +90,12 @@ RecognitionServiceDep = Annotated[RecognitionService, Depends(recognition)]
 OfflineServiceDep = Annotated[OfflineRecognitionService, Depends(offline)]
 RosterImportServiceDep = Annotated[RosterImportService, Depends(roster_import)]
 ObjectStorageDep = Annotated[ObjectStorage, Depends(object_storage)]
+CameraManagerDep = Annotated[CameraManager, Depends(cameras)]
 
 __all__ = [
     "DEFAULT_PAGE_SIZE",
     "AttendanceServiceDep",
+    "CameraManagerDep",
     "ClassroomServiceDep",
     "ContainerDep",
     "ObjectStorageDep",
