@@ -11,6 +11,7 @@ def touch(path):
     open(path, "w").close()
 
 
+# checks mask type is correctly parsed from filenames, including multi-word types like surgical_blue
 def test_masktheface_parses_single_word_and_multi_word_mask_types(tmp_path, monkeypatch):
     mtf_dir = tmp_path / "masked"
     touch(mtf_dir / "Alice_Smith" / "Alice_Smith_0001_cloth.jpg")
@@ -25,6 +26,7 @@ def test_masktheface_parses_single_word_and_multi_word_mask_types(tmp_path, monk
     assert all(r["is_masked"] == 1 and r["source_tool"] == "masktheface" for r in rows)
 
 
+# checks a mask type not in KEEP_MASKTHEFACE_TYPES is filtered out of the manifest
 def test_masktheface_drops_types_outside_keep_list(tmp_path, monkeypatch):
     mtf_dir = tmp_path / "masked"
     touch(mtf_dir / "Bob_Jones" / "Bob_Jones_0001_gas.jpg")  # "gas" is not in KEEP_MASKTHEFACE_TYPES
@@ -36,6 +38,7 @@ def test_masktheface_drops_types_outside_keep_list(tmp_path, monkeypatch):
     assert rows == []
 
 
+# checks an image outside the reduced-scope manifest is excluded even if it exists on disk
 def test_masktheface_drops_images_outside_reduced_scope(tmp_path, monkeypatch):
     mtf_dir = tmp_path / "masked"
     touch(mtf_dir / "Carl_Lee" / "Carl_Lee_0005_N95.jpg")
@@ -48,6 +51,7 @@ def test_masktheface_drops_images_outside_reduced_scope(tmp_path, monkeypatch):
     assert rows == []
 
 
+# checks mfr2_labels.txt's "no-mask" entries are correctly flagged as unmasked, others as masked
 def test_mfr2_labels_map_no_mask_to_unmasked_flag(tmp_path, monkeypatch):
     mfr2_dir = tmp_path / "mfr2"
     touch(mfr2_dir / "Dana_Kim" / "Dana_Kim_0001.png")
@@ -67,6 +71,7 @@ def test_mfr2_labels_map_no_mask_to_unmasked_flag(tmp_path, monkeypatch):
     assert by_filename["Dana_Kim_0002.png"]["mask_type"] == "no-mask"
 
 
+# checks an MFR2 image with no matching label defaults to "unknown"/masked, not silently clean
 def test_mfr2_missing_label_falls_back_to_unknown(tmp_path, monkeypatch):
     mfr2_dir = tmp_path / "mfr2"
     touch(mfr2_dir / "Eve_Wu" / "Eve_Wu_0001.png")

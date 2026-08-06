@@ -12,6 +12,7 @@ def unit_vectors(n, dim=8, seed=0):
     return vectors / np.linalg.norm(vectors, axis=1, keepdims=True)
 
 
+# alice has an unmasked photo plus 2 surgical-masked photos (from different source images), bob only unmasked
 def make_data():
     emb = unit_vectors(4, seed=1)
     return {
@@ -25,6 +26,7 @@ def make_data():
     }
 
 
+# checks the gallery adds one masked template per (identity, mask_type) alongside the unmasked photo
 def test_multi_template_gallery_includes_unmasked_plus_one_template_per_mask_type():
     data = make_data()
     gallery_ids, gallery_emb, excluded_paths = multi_template.pick_multi_template_gallery(
@@ -36,6 +38,7 @@ def test_multi_template_gallery_includes_unmasked_plus_one_template_per_mask_typ
     assert gallery_emb.shape[0] == 3
 
 
+# checks the image chosen as a gallery template is removed from probes, so nothing matches itself
 def test_held_out_probes_exclude_whichever_image_became_a_template():
     data = make_data()
     _, _, excluded_paths = multi_template.pick_multi_template_gallery(data, "lfw_subset", "unmasked")

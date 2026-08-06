@@ -9,6 +9,7 @@ import numpy as np
 from evaluation import eval_sets
 
 
+# checks the gallery keeps exactly one photo per identity, choosing the lowest filename
 def test_pick_gallery_picks_lowest_filename_per_identity():
     data = {
         "dataset": np.array(["lfw_subset"] * 4),
@@ -26,6 +27,7 @@ def test_pick_gallery_picks_lowest_filename_per_identity():
     assert emb.shape == (2, 8)
 
 
+# checks a dataset with no matching gallery rows returns an empty, correctly-shaped result
 def test_pick_gallery_empty_dataset_does_not_crash():
     data = {
         "dataset": np.array(["mfr2"]),
@@ -39,6 +41,7 @@ def test_pick_gallery_empty_dataset_does_not_crash():
     assert emb.shape == (0, 512)
 
 
+# checks the probe set never includes whichever photo was picked as the gallery photo
 def test_unmasked_probes_excludes_gallery_rows():
     data = {
         "dataset": np.array(["lfw_subset"] * 3),
@@ -56,6 +59,7 @@ def test_unmasked_probes_excludes_gallery_rows():
     assert not any(np.array_equal(row, data["embedding"][0]) for row in emb)
 
 
+# checks only masked rows are returned, each tagged with its mask type and source tool
 def test_masked_probes_returns_only_masked_rows_with_metadata():
     data = {
         "dataset": np.array(["lfw_subset"] * 2),
@@ -72,6 +76,7 @@ def test_masked_probes_returns_only_masked_rows_with_metadata():
     assert source_tools[0] == "masktheface"
 
 
+# checks the full LFW gallery/probe split has the right counts and mask types on synthetic data
 def test_build_lfw_sets_end_to_end(synthetic_embeddings):
     sets = eval_sets.build_lfw_sets(synthetic_embeddings)
 

@@ -22,6 +22,14 @@ from app.recognition.ports import ComponentStatus, DetectedFace, Image
 _INPUT_MEAN = 127.5
 _INPUT_STD = 128.0
 
+#: Second attempt when the configured size finds nothing. Webcam frames and
+#: normal photos are scene-scale and always succeed on the first pass at the
+#: configured size (640 by default); this exists for already-tightly-cropped
+#: uploads (e.g. RWMFD/MFR2-style images with no margin around the face),
+#: where letterboxing into 640 upsamples them past the point SCRFD's anchors
+#: still match. Same value verified against both during backend integration.
+_FALLBACK_INPUT_SIZE = 160
+
 
 class ScrfdFaceDetector:
     def __init__(
@@ -60,11 +68,20 @@ class ScrfdFaceDetector:
         self._model.warmup()
 
     def detect(self, image: Image) -> list[DetectedFace]:
-        # Letterbox, run the graph, decode, suppress overlaps, rescale.
+        # Scene-scale images (webcam, normal photos) always succeed at the configured
+        # size. A second pass at a smaller size only runs when the first finds nothing,
+        # so this costs nothing extra for the common case.
         if image.ndim != 3 or image.shape[2] != 3:
             raise DependencyUnavailableError("The detector expects a 3-channel BGR image.")
 
         width, height = self._input_size()
+        faces = self._detect_at_size(image, width, height)
+        if faces or (width, height) == (_FALLBACK_INPUT_SIZE, _FALLBACK_INPUT_SIZE):
+            return faces
+        return self._detect_at_size(image, _FALLBACK_INPUT_SIZE, _FALLBACK_INPUT_SIZE)
+
+    def _detect_at_size(self, image: Image, width: int, height: int) -> list[DetectedFace]:
+        # One letterbox-run-decode pass at a specific input size.
         padded, scale = self._letterbox(image, width, height)
         outputs = self._model.run(self._to_blob(padded))
         if len(outputs) < scrfd_decode.FMC * 3:
