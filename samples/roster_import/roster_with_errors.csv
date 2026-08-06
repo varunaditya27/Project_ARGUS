@@ -1,0 +1,8 @@
+student_name,roll_no,class_id,image_filename,image_url
+Sample Student 21,121,,student_101.jpg,
+Sample Student 22,122,,,https://images.example.edu/enrollment/122.jpg
+Sample Student 23,CS2024023,,student_101.jpg,
+,124,,student_101.jpg,
+Sample Student 25,125,,missing_photo.jpg,
+Sample Student 26,121,,student_101.jpg,
+Sample Student 27,127,,,http://images.example.edu/enrollment/127.jpg

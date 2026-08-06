@@ -114,6 +114,12 @@ class Settings(BaseSettings):
             return [item.strip() for item in value.split(",") if item.strip()]
         return value
 
+    @field_validator("match_threshold", "review_threshold", "minimum_margin", mode="before")
+    @classmethod
+    def _blank_is_unset(cls, value: object) -> object:
+        # .env ships these keys empty; an empty value means uncalibrated, not zero.
+        return None if isinstance(value, str) and not value.strip() else value
+
     @field_validator("log_level", mode="before")
     @classmethod
     def _upper(cls, value: object) -> object:
