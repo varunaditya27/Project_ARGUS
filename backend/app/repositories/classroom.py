@@ -1,3 +1,5 @@
+"""Classroom queries."""
+
 from __future__ import annotations
 
 import uuid
@@ -16,27 +18,27 @@ class ClassroomRepository:
     async def create(
         self, *, class_name: str, department: str, semester: int, strength: int
     ) -> Classroom:
+        # Insert and flush so the generated class_id is available to the caller.
         classroom = Classroom(
-            class_name=class_name,
-            department=department,
-            semester=semester,
-            strength=strength,
+            class_name=class_name, department=department, semester=semester, strength=strength
         )
         self._session.add(classroom)
         await self._session.flush()
         return classroom
 
     async def get(self, class_id: uuid.UUID) -> Classroom | None:
+        # Primary key lookup.
         return await self._session.get(Classroom, class_id)
 
     async def list(
         self,
         *,
-        department: str | None = None,
-        semester: int | None = None,
+        department: str | None,
+        semester: int | None,
         limit: int,
         offset: int,
     ) -> Sequence[Classroom]:
+        # Filtered page, ordered so results are stable across requests.
         stmt = select(Classroom).order_by(
             Classroom.department, Classroom.semester, Classroom.class_name
         )
@@ -44,14 +46,9 @@ class ClassroomRepository:
             stmt = stmt.where(Classroom.department == department)
         if semester is not None:
             stmt = stmt.where(Classroom.semester == semester)
-        result = await self._session.execute(stmt.limit(limit).offset(offset))
-        return result.scalars().all()
+        return (await self._session.execute(stmt.limit(limit).offset(offset))).scalars().all()
 
     async def roster_count(self, class_id: uuid.UUID) -> int:
-        """Live number of students assigned to the classroom.
-
-        ``classrooms.strength`` is the declared strength supplied by the admin;
-        this count is what attendance maths uses.
-        """
+        # Live number of students assigned, which is what attendance maths uses.
         stmt = select(func.count()).select_from(Student).where(Student.class_id == class_id)
         return int((await self._session.execute(stmt)).scalar_one())

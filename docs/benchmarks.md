@@ -22,7 +22,7 @@ produced, estimated or implied by these scripts.
 
 ```bash
 cd backend
-pip install -e ".[dev,recognition]"
+pip install -r requirements-dev.txt
 ```
 
 ### Attendance tier
@@ -43,14 +43,12 @@ The roster it generates is obvious placeholder load data (`BENCH-000001` names,
 ```bash
 export ARGUS_CHROMA_MODE=persistent
 export ARGUS_CHROMA_PATH=./.chroma-bench
-python -m benchmarks.vector_search --source random --gallery 20000 --queries 200 --k 5 10 25
+python -m benchmarks.vector_search --gallery 20000 --queries 200 --k 5 10 25
 ```
 
-`--source random` fills a throwaway `argus_bench_*` collection with random unit
-vectors and reports **latency only** - random vectors carry no identity, so the
-script refuses to emit any accuracy figure. `--source real` (the default) queries
-the live gallery instead and will be usable once the ArcFace adapter and
-enrollment exist.
+It fills a throwaway `argus_bench_*` collection with random unit vectors and
+reports **latency only** - random vectors carry no identity, so the script emits
+no accuracy figure. Drop the collection afterwards.
 
 Both scripts write timestamped JSON + Markdown into `backend/benchmarks/results/`
 (git-ignored). Re-run them on the deployment hardware; the numbers below describe

@@ -1,11 +1,13 @@
+"""Classroom use cases."""
+
 from __future__ import annotations
 
 import uuid
 from collections.abc import Sequence
 
 from app.core.errors import NotFoundError
-from app.db.database import Database
 from app.db.models import Classroom
+from app.db.session import Database
 from app.repositories.classroom import ClassroomRepository
 from app.schemas.classroom import ClassroomCreate
 
@@ -15,6 +17,7 @@ class ClassroomService:
         self._db = database
 
     async def create(self, payload: ClassroomCreate) -> Classroom:
+        # Register a classroom.
         async with self._db.session() as session:
             return await ClassroomRepository(session).create(
                 class_name=payload.class_name,
@@ -24,19 +27,16 @@ class ClassroomService:
             )
 
     async def list(
-        self,
-        *,
-        department: str | None,
-        semester: int | None,
-        limit: int,
-        offset: int,
+        self, *, department: str | None, semester: int | None, limit: int, offset: int
     ) -> Sequence[Classroom]:
+        # Filtered page of classrooms.
         async with self._db.session() as session:
             return await ClassroomRepository(session).list(
                 department=department, semester=semester, limit=limit, offset=offset
             )
 
     async def get_with_roster_count(self, class_id: uuid.UUID) -> tuple[Classroom, int]:
+        # One classroom plus the live number of students assigned to it.
         async with self._db.session() as session:
             repository = ClassroomRepository(session)
             classroom = await repository.get(class_id)

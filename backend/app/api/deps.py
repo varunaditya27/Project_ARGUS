@@ -11,78 +11,75 @@ from app.container import Container
 from app.schemas.common import DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE
 from app.services.attendance import AttendanceService
 from app.services.classroom import ClassroomService
+from app.services.offline import OfflineRecognitionService
 from app.services.recognition import RecognitionService
-from app.services.registration_import import RegistrationImportService
+from app.services.roster_import import RosterImportService
 from app.services.session import SessionService
 from app.services.student import StudentService
 
 
 def get_container(request: Request) -> Container:
+    # The container built once at startup.
     return request.app.state.container
 
 
 def get_container_ws(websocket: WebSocket) -> Container:
+    # Same container, for the WebSocket route.
     return websocket.app.state.container
 
 
-def get_classroom_service(
-    container: Annotated[Container, Depends(get_container)],
-) -> ClassroomService:
+ContainerDep = Annotated[Container, Depends(get_container)]
+
+
+def classrooms(container: ContainerDep) -> ClassroomService:
     return container.services.classrooms
 
 
-def get_student_service(
-    container: Annotated[Container, Depends(get_container)],
-) -> StudentService:
+def students(container: ContainerDep) -> StudentService:
     return container.services.students
 
 
-def get_session_service(
-    container: Annotated[Container, Depends(get_container)],
-) -> SessionService:
+def sessions(container: ContainerDep) -> SessionService:
     return container.services.sessions
 
 
-def get_attendance_service(
-    container: Annotated[Container, Depends(get_container)],
-) -> AttendanceService:
+def attendance(container: ContainerDep) -> AttendanceService:
     return container.services.attendance
 
 
-def get_recognition_service(
-    container: Annotated[Container, Depends(get_container)],
-) -> RecognitionService:
+def recognition(container: ContainerDep) -> RecognitionService:
     return container.services.recognition
 
 
-def get_registration_import_service(
-    container: Annotated[Container, Depends(get_container)],
-) -> RegistrationImportService:
-    return container.services.registration_import
+def offline(container: ContainerDep) -> OfflineRecognitionService:
+    return container.services.offline
+
+
+def roster_import(container: ContainerDep) -> RosterImportService:
+    return container.services.roster_import
 
 
 PageLimit = Annotated[int, Query(ge=1, le=MAX_PAGE_SIZE, description="Maximum items to return.")]
 PageOffset = Annotated[int, Query(ge=0)]
 
-ContainerDep = Annotated[Container, Depends(get_container)]
-ClassroomServiceDep = Annotated[ClassroomService, Depends(get_classroom_service)]
-StudentServiceDep = Annotated[StudentService, Depends(get_student_service)]
-SessionServiceDep = Annotated[SessionService, Depends(get_session_service)]
-AttendanceServiceDep = Annotated[AttendanceService, Depends(get_attendance_service)]
-RecognitionServiceDep = Annotated[RecognitionService, Depends(get_recognition_service)]
-RegistrationImportServiceDep = Annotated[
-    RegistrationImportService, Depends(get_registration_import_service)
-]
+ClassroomServiceDep = Annotated[ClassroomService, Depends(classrooms)]
+StudentServiceDep = Annotated[StudentService, Depends(students)]
+SessionServiceDep = Annotated[SessionService, Depends(sessions)]
+AttendanceServiceDep = Annotated[AttendanceService, Depends(attendance)]
+RecognitionServiceDep = Annotated[RecognitionService, Depends(recognition)]
+OfflineServiceDep = Annotated[OfflineRecognitionService, Depends(offline)]
+RosterImportServiceDep = Annotated[RosterImportService, Depends(roster_import)]
 
 __all__ = [
     "DEFAULT_PAGE_SIZE",
     "AttendanceServiceDep",
     "ClassroomServiceDep",
     "ContainerDep",
+    "OfflineServiceDep",
     "PageLimit",
     "PageOffset",
     "RecognitionServiceDep",
-    "RegistrationImportServiceDep",
+    "RosterImportServiceDep",
     "SessionServiceDep",
     "StudentServiceDep",
     "get_container_ws",

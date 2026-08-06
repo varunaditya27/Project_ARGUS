@@ -1,25 +1,14 @@
-"""Identification latency at gallery scale ("can we search 20 000 people fast?").
+"""k-NN latency of the template index at gallery scale (default: 20 000 vectors).
 
-Two sources, and the difference matters:
-
-``--source real`` (default)
-    Queries the configured ARGUS collection with vectors taken from that same
-    collection. Requires an enrolled gallery, so it only works once the ArcFace
-    adapter and enrollment exist. This is the number to publish.
-
-``--source random``
-    Writes random unit vectors into a **throwaway** ``argus_bench_*`` collection
-    to measure index latency alone. It reports latency and nothing else: random
-    vectors say nothing about recognition accuracy, so this mode refuses to emit
-    any accuracy figure and labels every result accordingly.
-
-Rank-1 / ROC / TAR@FAR belong to the evaluation pipeline with real labelled
-probes, not to this backend benchmark.
+Random unit vectors are written into a throwaway ``argus_bench_*`` collection and
+queried back. This measures index latency and nothing else - random vectors say
+nothing about recognition accuracy, so no accuracy figure is produced here.
+Rank-1, ROC and TAR@FAR belong to the evaluation pipeline with labelled probes.
 
 Usage::
 
     $env:ARGUS_CHROMA_MODE = "persistent"; $env:ARGUS_CHROMA_PATH = "./.chroma"
-    python -m benchmarks.vector_search --source random --gallery 20000 --queries 200
+    python -m benchmarks.vector_search --gallery 20000 --queries 200
 """
 
 from __future__ import annotations
@@ -33,17 +22,16 @@ from pathlib import Path
 import numpy as np
 
 from app.core.config import Settings
-from app.recognition.adapters.chroma_index import ChromaTemplateIndex
-from app.recognition.factory import build_template_index
+from app.recognition.adapters.chroma import ChromaTemplateIndex
 from benchmarks._report import BenchmarkReport, timed
 
 RESULTS_DIR = Path(__file__).resolve().parent / "results"
-RANDOM_DISCLAIMER = "latency only - random vectors, no accuracy meaning"
+DISCLAIMER = "latency only - random vectors, no accuracy meaning"
 
 
 def parse_args() -> argparse.Namespace:
+    # Command line for the benchmark.
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--source", choices=("real", "random"), default="real")
     parser.add_argument("--gallery", type=int, default=20_000, help="Templates in the gallery.")
     parser.add_argument("--queries", type=int, default=200)
     parser.add_argument("--k", type=int, nargs="+", default=[5, 10, 25])
@@ -54,16 +42,17 @@ def parse_args() -> argparse.Namespace:
 
 
 def unit_vectors(count: int, dim: int, rng: np.random.Generator) -> np.ndarray:
+    # L2-normalised rows, matching what ArcFace produces.
     vectors = rng.standard_normal((count, dim), dtype=np.float32)
     return vectors / np.linalg.norm(vectors, axis=1, keepdims=True)
 
 
-async def build_random_gallery(
+async def build_gallery(
     settings: Settings, args: argparse.Namespace, rng: np.random.Generator
 ) -> tuple[ChromaTemplateIndex, np.ndarray]:
-    collection = f"argus_bench_{uuid.uuid4().hex[:8]}"
+    # Fill a throwaway collection so the real one is never polluted.
     index = ChromaTemplateIndex(
-        collection_name=collection,
+        collection_name=f"argus_bench_{uuid.uuid4().hex[:8]}",
         persist_path=str(settings.chroma_path) if settings.chroma_path else None,
         host=settings.chroma_host,
         port=settings.chroma_port,
@@ -76,11 +65,11 @@ async def build_random_gallery(
             {f"bench_{start + offset}": row for offset, row in enumerate(chunk)},
             model_version="benchmark-random",
         )
-    print(f"Created throwaway collection {collection} with {args.gallery} random vectors.")
     return index, vectors
 
 
 async def run(args: argparse.Namespace) -> int:
+    # Fill the gallery, then time k-NN search at every requested k.
     settings = Settings()
     if settings.chroma_mode == "disabled":
         sys.exit(
@@ -88,61 +77,36 @@ async def run(args: argparse.Namespace) -> int:
             "ARGUS_CHROMA_PATH) or =http (with ARGUS_CHROMA_HOST/PORT)."
         )
 
+    print(f"[!] {DISCLAIMER.upper()}")
     rng = np.random.default_rng(args.seed)
+    index, probes = await build_gallery(settings, args, rng)
     report = BenchmarkReport(
         title="ARGUS recognition tier - vector search latency",
         parameters={
-            "source": args.source,
-            "requested_gallery": args.gallery,
+            "gallery": await index.count(),
             "queries": args.queries,
             "embedding_dim": settings.embedding_dim,
             "chroma_mode": settings.chroma_mode,
-            "collection": settings.chroma_collection,
+            "collection": index.status().detail,
         },
     )
 
-    if args.source == "real":
-        index = build_template_index(settings)
-        if not index.status().configured:
-            sys.exit("The configured template index is disabled.")
-        gallery_size = await index.count()
-        report.parameters["actual_gallery"] = gallery_size
-        if gallery_size < args.gallery:
-            sys.exit(
-                f"The collection holds {gallery_size} templates but the benchmark asked for "
-                f"{args.gallery}. Enroll more identities or lower --gallery. Random probe "
-                "vectors are not substituted, because that would not measure real search."
-            )
-        sys.exit(
-            "Real-source probing needs enrolled embeddings to query with. Implement the ArcFace "
-            "adapter and enroll a gallery first, then re-run; until then use --source random for "
-            "latency-only numbers."
-        )
-
-    print(f"[!] {RANDOM_DISCLAIMER.upper()}")
-    index, probe_pool = await build_random_gallery(settings, args, rng)
-    report.parameters["collection"] = index.status().detail
-    report.parameters["actual_gallery"] = await index.count()
-
     for k in args.k:
-        measurement = report.measure(f"k-NN search (k={k})", items=1, notes=RANDOM_DISCLAIMER)
-        for query_index in range(args.queries):
-            probe = probe_pool[query_index % len(probe_pool)]
+        measurement = report.measure(f"k-NN search (k={k})", items=1, notes=DISCLAIMER)
+        for query in range(args.queries):
+            probe = probes[query % len(probes)]
             with timed(measurement):
                 await index.search([probe], k)
 
-    json_path, md_path = report.write(args.output, f"vector-search-{args.source}")
+    json_path, md_path = report.write(args.output, "vector-search")
     print(report.to_markdown())
     print(f"Written: {json_path}\n         {md_path}")
-    if args.source == "random":
-        print(
-            "\nReminder: drop the throwaway argus_bench_* collection when you are done, and do "
-            "not quote these numbers as accuracy."
-        )
+    print("\nDrop the throwaway argus_bench_* collection when you are done.")
     return 0
 
 
 def main() -> int:
+    # Entry point.
     return asyncio.run(run(parse_args()))
 
 

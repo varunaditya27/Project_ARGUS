@@ -6,6 +6,8 @@ import uuid
 
 from httpx import AsyncClient
 
+from tests.helpers import CLASS_ID, PNG, build_zip, roster_csv
+
 
 async def test_health_reports_degraded_without_dependencies(client: AsyncClient) -> None:
     response = await client.get("/api/v1/health")
@@ -13,17 +15,12 @@ async def test_health_reports_degraded_without_dependencies(client: AsyncClient)
     body = response.json()
     assert body["status"] == "degraded"
     assert {check["name"] for check in body["checks"]} == {"postgresql", "chromadb"}
-    assert all(check["code"] == "dependency_not_configured" for check in body["checks"])
+    assert not any(check["healthy"] for check in body["checks"])
 
 
-async def test_runtime_exposes_capture_configuration(client: AsyncClient) -> None:
-    body = (await client.get("/api/v1/runtime")).json()
-    assert body["database_configured"] is False
-    assert body["recognition_ready"] is False
-    assert body["capture"]["pending_observations"] == 0
-
-
-async def test_models_lists_placeholders_and_uncalibrated_thresholds(client: AsyncClient) -> None:
+async def test_models_reports_missing_components_and_uncalibrated_thresholds(
+    client: AsyncClient,
+) -> None:
     body = (await client.get("/api/v1/models")).json()
     components = {component["name"]: component for component in body["components"]}
     assert components.keys() == {
@@ -43,10 +40,8 @@ async def test_models_lists_placeholders_and_uncalibrated_thresholds(client: Asy
         "match_threshold": None,
         "review_threshold": None,
         "minimum_margin": None,
-        "calibrated": False,
     }
     assert body["recognition_ready"] is False
-    assert body["embedding_dim"] == 512
 
 
 async def test_database_endpoints_fail_with_a_configuration_hint(client: AsyncClient) -> None:
@@ -89,3 +84,32 @@ async def test_unknown_route_uses_the_shared_envelope(client: AsyncClient) -> No
     response = await client.get(f"/api/v1/sessions/{uuid.uuid4()}/does-not-exist")
     assert response.status_code == 404
     assert "error" in response.json()
+
+
+async def test_import_returns_503_when_object_storage_is_disabled(
+    client_unreachable_db: AsyncClient,
+) -> None:
+    response = await client_unreachable_db.post(
+        "/api/v1/students/import",
+        files={
+            "csv_file": ("roster.csv", roster_csv("Ada,1,ada.png"), "text/csv"),
+            "images": ("images.zip", build_zip({"ada.png": PNG}).getvalue(), "application/zip"),
+        },
+        data={"class_id": str(CLASS_ID)},
+    )
+    assert response.status_code == 503
+    assert response.json()["error"]["code"] == "dependency_not_configured"
+
+
+async def test_import_reports_a_missing_header_with_the_shared_envelope(
+    client_unreachable_db: AsyncClient,
+) -> None:
+    response = await client_unreachable_db.post(
+        "/api/v1/students/import",
+        files={"csv_file": ("roster.csv", roster_csv("Ada,1,ada.png"), "text/csv")},
+        data={"dry_run": "true"},
+    )
+    assert response.status_code == 422
+    error = response.json()["error"]
+    assert error["code"] == "invalid_request"
+    assert error["details"]["missing"] == ["class_id"]

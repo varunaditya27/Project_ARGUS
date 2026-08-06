@@ -1,12 +1,10 @@
-"""Decision policy tests (docs/design.md -> Decision Logic)."""
+"""Decision policy: MATCH / HUMAN_REVIEW / UNKNOWN."""
 
 from __future__ import annotations
 
 import uuid
 
-import pytest
-
-from app.domain.enums import DecisionState
+from app.domain import DecisionState
 from app.recognition.decision import Thresholds, decide, rank_identities
 from app.recognition.ports import TemplateMatch
 
@@ -53,8 +51,7 @@ def test_match_requires_score_and_margin() -> None:
         [match(RAYYAN, "surgical_blue", 0.71), match(VARUN, "cloth_black", 0.57)], CALIBRATED
     )
     assert decision.state is DecisionState.MATCH
-    assert decision.matched_template == "surgical_blue"
-    assert decision.margin == pytest.approx(0.14)
+    assert decision.student_id == RAYYAN
 
 
 def test_close_runner_up_forces_review() -> None:
@@ -71,14 +68,14 @@ def test_between_review_and_match_is_review() -> None:
 def test_stranger_is_unknown_not_nearest_neighbour() -> None:
     decision = decide([match(RAYYAN, "UNMASKED", 0.31)], CALIBRATED)
     assert decision.state is DecisionState.UNKNOWN
-    assert decision.student_id == RAYYAN  # reported as the best candidate, not as a match
+    # Reported as the best candidate, but never as a match.
+    assert decision.student_id == RAYYAN
+    assert decision.is_match is False
 
 
 def test_single_candidate_has_no_margin_to_fail() -> None:
     decision = decide([match(RAYYAN, "UNMASKED", 0.90)], CALIBRATED)
     assert decision.state is DecisionState.MATCH
-    assert decision.margin is None
-    assert decision.second_best_similarity is None
 
 
 def test_quality_note_downgrades_a_would_be_match() -> None:

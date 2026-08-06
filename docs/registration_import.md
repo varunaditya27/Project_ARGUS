@@ -18,8 +18,8 @@ skipped row with the reason. It is **not** all-or-nothing.
 |-------|------|----------|-------------|
 | `csv_file` | file | yes | UTF-8 CSV. A UTF-8 BOM is accepted. |
 | `images` | file | no | ZIP archive holding the files named by `image_filename`. |
-| `class_id` | UUID | no | Classroom for **every** row in the file. Accepted as a form field or a query parameter. |
-| `dry_run` | bool | no | Default `false`. Validate and report without writing anything. Accepted as a form field or a query parameter. |
+| `class_id` | UUID | no | Classroom for **every** row in the file. |
+| `dry_run` | bool | no | Default `false`. Validate and report without writing anything. |
 
 When `class_id` is supplied it applies to every row and the CSV `class_id` column
 becomes optional (and is ignored). This is the common "import one classroom's
@@ -90,10 +90,6 @@ image only skips its own row.
   "skipped": 1,
   "dry_run": false,
   "uploaded_images": 1,
-  "students": [
-    {"student_id": "0f2b...", "roll_no": 1},
-    {"student_id": "8ac4...", "roll_no": 3}
-  ],
   "errors": [
     {"row": 3, "roll_no": 2, "reason": "a student with this roll number is already enrolled."}
   ],
@@ -134,17 +130,17 @@ PostgreSQL or object storage is unavailable.
 # Dry run
 
 ```bash
-curl -X POST "http://localhost:8000/api/v1/students/import?dry_run=true" \
+curl -X POST "http://localhost:8000/api/v1/students/import" \
   -F "csv_file=@roster.csv" \
   -F "images=@images.zip" \
-  -F "class_id=7f9c1f22-0f0e-4d1e-9d2a-2c9d1a4b5e60"
+  -F "class_id=7f9c1f22-0f0e-4d1e-9d2a-2c9d1a4b5e60" \
+  -F "dry_run=true"
 ```
 
 A dry run parses the CSV, validates the archive, resolves every image, checks the
 classrooms and the already-used roll numbers, and returns the same report - but
 writes nothing to PostgreSQL and uploads nothing to R2. `created` is then the
-number of rows that *would* be created, `uploaded_images` is `0` and `students` is
-empty.
+number of rows that *would* be created and `uploaded_images` is `0`.
 
 A dry run still fails with 503 when rows need an upload and object storage is not
 configured: the real run could not succeed, so the dry run does not pretend
@@ -178,12 +174,6 @@ the request fail with `503 dependency_not_configured` naming these variables -
 | `ARGUS_R2_PUBLIC_BASE_URL` | Public base URL of the bucket (custom domain or `r2.dev`); stored URLs are built from it. |
 | `ARGUS_R2_KEY_PREFIX` | Key prefix, default `enrollment`. |
 
-Install the extra that provides the client:
-
-```bash
-pip install -e ".[storage]"
-```
-
 Object keys are deterministic:
 
 ```text
@@ -211,8 +201,8 @@ bucket.
 * **Ordering.** Images are uploaded before the rows are inserted, because
   `image_url` is NOT NULL. If an insert batch then fails, the affected rows are
   reported as skipped and the now-unreferenced object keys are logged at ERROR
-  level (`Registration import left N uploaded image(s) ... unreferenced`) so they can
-  be reconciled. There is no import-job table in `docs/db.md`, so the log is the
+  level (`Roster import left N uploaded image(s) unreferenced ...`) so they can be
+  reconciled. There is no import-job table in `docs/db.md`, so the log is the
   audit trail.
 * **Scale.** The already-used roll numbers are fetched with a single
   `WHERE roll_no = ANY(...)` query, classrooms are looked up once per distinct

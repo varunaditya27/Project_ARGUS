@@ -1,3 +1,5 @@
+"""Class session wire format."""
+
 from __future__ import annotations
 
 import datetime as dt
@@ -5,7 +7,7 @@ import uuid
 
 from pydantic import Field, model_validator
 
-from app.domain.enums import SessionStatus
+from app.domain import SessionStatus
 from app.schemas.common import ApiModel
 
 
@@ -16,14 +18,11 @@ class SessionCreate(ApiModel):
     date: dt.date
     start_time: dt.time
     end_time: dt.time
-    status: SessionStatus = Field(
-        default=SessionStatus.ACTIVE,
-        description="A session must be ACTIVE for attendance to be captured. "
-        "At most one ACTIVE session per classroom is allowed.",
-    )
+    status: SessionStatus = SessionStatus.ACTIVE
 
     @model_validator(mode="after")
     def _check_window(self) -> SessionCreate:
+        # docs/db.md declares no CHECK constraint, so the window is validated here.
         if self.end_time <= self.start_time:
             raise ValueError("end_time must be after start_time")
         return self
@@ -41,14 +40,11 @@ class SessionRead(ApiModel):
 
 
 class SessionCloseReport(ApiModel):
-    """Result of the close transaction: last flush + absence pass + status flip."""
+    """Result of the close transaction: final flush, absence pass, status flip."""
 
     session_id: uuid.UUID
     closed_at: dt.datetime
-    flushed_observations: int = Field(
-        description="Observations still buffered at close time that were written before closing."
-    )
     present: int
-    absent_marked: int = Field(description="Absent rows created by this close.")
+    #: Absent rows created by this close.
+    absent_marked: int
     roster_count: int
-    total_recorded: int

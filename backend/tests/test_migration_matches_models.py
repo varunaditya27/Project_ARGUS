@@ -14,7 +14,7 @@ from alembic.migration import MigrationContext
 from sqlalchemy import Connection, text
 from sqlalchemy.ext.asyncio import create_async_engine
 
-from app.db.base import Base
+from app.db.models import Base
 from tests.conftest import TEST_DATABASE_URL, requires_database
 
 pytestmark = [pytest.mark.database, requires_database]

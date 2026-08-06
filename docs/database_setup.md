@@ -78,7 +78,7 @@ provider mandates TLS.
 
 ```bash
 cd backend
-pip install -e .
+pip install -r requirements.txt
 alembic upgrade head
 ```
 
@@ -162,8 +162,8 @@ recognition at all. `0.0` is the sentinel; the meaning comes from
 **`classrooms.strength` is the declared strength, not a live count.** It is the
 number an administrator enters. Attendance maths uses `COUNT(students)` for the
 classroom instead, so a stale `strength` can never cause a wrong absence list.
-The API returns both (`declared_strength` and `roster_count`) so a mismatch is
-visible.
+`GET /classrooms/{class_id}` returns both `strength` and `roster_count`, so a
+mismatch is visible.
 
 **`students.roll_no` stays `INTEGER` and globally unique**, exactly as
 documented. It is also the pagination cursor for roster and register listings.
@@ -204,8 +204,8 @@ POST /sessions/{id}/close
 Two properties matter for integration:
 
 1. **Attendance is written continuously, not at the end.** Reading the register
-   mid-lecture returns who has been seen so far. `unrecorded` in the summary is
-   how many roster members have no row yet.
+   mid-lecture returns who has been seen so far; `roster_count - present` in the
+   summary is how many roster members have no row yet.
 2. **Absence is derived exactly once, at close.** Nothing writes `Absent` while
    the session is running, so a student who arrives late is never wrongly marked.
 
@@ -249,7 +249,7 @@ never leave searchable vectors pointing at a deleted identity.
 | `ARGUS_OBJECT_STORAGE_MODE` | `disabled` \| `r2` | `disabled` makes any import that carries images answer 503 rather than invent a URL. |
 | `ARGUS_R2_ENDPOINT_URL` | `https://<account>.r2.cloudflarestorage.com` | Required for `r2`. |
 | `ARGUS_R2_BUCKET` | bucket name | Required for `r2`. |
-| `ARGUS_R2_ACCESS_KEY_ID` / `ARGUS_R2_SECRET_ACCESS_KEY` | credentials | Required for `r2`. Needs the extra: `pip install -e '.[storage]'`. |
+| `ARGUS_R2_ACCESS_KEY_ID` / `ARGUS_R2_SECRET_ACCESS_KEY` | credentials | Required for `r2`. |
 | `ARGUS_R2_PUBLIC_BASE_URL` | `https://images.example.edu` | Required for `r2`; the prefix written into `students.image_url`. |
 | `ARGUS_R2_KEY_PREFIX` | `enrollment` | Object key prefix. |
 
@@ -268,8 +268,7 @@ images were uploaded, the orphaned keys are logged at `ERROR` for reconciliation
 
 ```bash
 curl http://localhost:8000/api/v1/health    # 200 = every dependency reachable
-curl http://localhost:8000/api/v1/runtime   # capture interval, buffered work
-curl http://localhost:8000/api/v1/models    # which adapters are real, thresholds
+curl http://localhost:8000/api/v1/models    # which components are wired, thresholds
 ```
 
 `/health` returns `503` with a per-dependency reason while anything is missing;

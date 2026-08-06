@@ -1,19 +1,12 @@
-"""ORM mapping of the schema documented in ``docs/db.md``.
+"""ORM mapping of the schema in docs/db.md.
 
-The mapping is deliberately literal: the four documented tables, their columns,
-types and the two documented constraints, and nothing else. No extra index,
-CHECK constraint or foreign-key delete rule is declared, so the DDL Alembic
-emits is exactly what the schema document specifies.
+The mapping is deliberately literal: four tables, their columns and the two
+documented constraints, nothing else. Two consequences are therefore handled in
+the service layer instead of by DDL - foreign keys default to NO ACTION, so
+referencing rows are deleted explicitly, and nothing stops a second ACTIVE
+session, so SessionService serialises that check with an advisory lock.
 
-Two consequences are handled in the service layer rather than the schema:
-
-* Foreign keys default to ``NO ACTION``, so rows that reference a student or a
-  session must be removed before it is deleted -- see ``StudentService.delete``.
-* Nothing stops two ACTIVE sessions existing for one classroom, which the
-  recognition workflow ("Fetch Active Class Session") assumes cannot happen.
-  ``SessionService.create`` serialises that check with an advisory lock.
-
-Face embeddings are **not** stored here; they live in ChromaDB.
+Face embeddings are not stored here; they live in ChromaDB.
 """
 
 from __future__ import annotations
@@ -26,17 +19,31 @@ from sqlalchemy import (
     Float,
     ForeignKey,
     Integer,
+    MetaData,
     Text,
     Time,
     UniqueConstraint,
     text,
 )
 from sqlalchemy.dialects.postgresql import TIMESTAMP, UUID
-from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
-from app.db.base import Base
+#: Predictable names keep the models, the Alembic revision and the ON CONFLICT
+#: targets in app.repositories.attendance in sync.
+NAMING_CONVENTION = {
+    "ix": "ix_%(table_name)s_%(column_0_N_name)s",
+    "uq": "uq_%(table_name)s_%(column_0_N_name)s",
+    "ck": "ck_%(table_name)s_%(constraint_name)s",
+    "fk": "fk_%(table_name)s_%(column_0_name)s",
+    "pk": "pk_%(table_name)s",
+}
 
 _UUID_PK = text("gen_random_uuid()")
+_NOW = text("CURRENT_TIMESTAMP")
+
+
+class Base(DeclarativeBase):
+    metadata = MetaData(naming_convention=NAMING_CONVENTION)
 
 
 class Classroom(Base):
@@ -48,11 +55,9 @@ class Classroom(Base):
     class_name: Mapped[str] = mapped_column(Text, nullable=False)
     department: Mapped[str] = mapped_column(Text, nullable=False)
     semester: Mapped[int] = mapped_column(Integer, nullable=False)
-    #: Declared/official class strength. The live roster count is derived from
-    #: ``students`` and is what the absence pass uses.
+    #: Declared strength. The live roster count is derived from `students` and is
+    #: what the absence pass uses.
     strength: Mapped[int] = mapped_column(Integer, nullable=False)
-
-    students: Mapped[list[Student]] = relationship(back_populates="classroom", lazy="raise")
 
 
 class Student(Base):
@@ -62,20 +67,15 @@ class Student(Base):
         UUID(as_uuid=True), primary_key=True, server_default=_UUID_PK
     )
     student_name: Mapped[str] = mapped_column(Text, nullable=False)
-    #: INTEGER per docs/db.md, globally unique.
     roll_no: Mapped[int] = mapped_column(Integer, nullable=False, unique=True)
     class_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True),
-        ForeignKey("classrooms.class_id"),
-        nullable=True,
+        UUID(as_uuid=True), ForeignKey("classrooms.class_id"), nullable=True
     )
-    #: Cloudflare R2 URL of the original (unmasked) enrollment image.
+    #: Cloudflare R2 URL of the unmasked enrollment image.
     image_url: Mapped[str] = mapped_column(Text, nullable=False)
     created_at: Mapped[dt.datetime] = mapped_column(
-        TIMESTAMP(timezone=False), nullable=False, server_default=text("CURRENT_TIMESTAMP")
+        TIMESTAMP(timezone=False), nullable=False, server_default=_NOW
     )
-
-    classroom: Mapped[Classroom | None] = relationship(back_populates="students", lazy="raise")
 
 
 class ClassSession(Base):
@@ -85,9 +85,7 @@ class ClassSession(Base):
         UUID(as_uuid=True), primary_key=True, server_default=_UUID_PK
     )
     class_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
-        ForeignKey("classrooms.class_id"),
-        nullable=False,
+        UUID(as_uuid=True), ForeignKey("classrooms.class_id"), nullable=False
     )
     subject: Mapped[str] = mapped_column(Text, nullable=False)
     faculty: Mapped[str] = mapped_column(Text, nullable=False)
@@ -104,25 +102,17 @@ class Attendance(Base):
         UUID(as_uuid=True), primary_key=True, server_default=_UUID_PK
     )
     session_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
-        ForeignKey("class_sessions.session_id"),
-        nullable=False,
+        UUID(as_uuid=True), ForeignKey("class_sessions.session_id"), nullable=False
     )
     student_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
-        ForeignKey("students.student_id"),
-        nullable=False,
+        UUID(as_uuid=True), ForeignKey("students.student_id"), nullable=False
     )
-    #: First detection that marked the student present, or the session close
-    #: instant for rows created by the absence pass.
+    #: First detection that marked the student present, or the close instant for
+    #: rows created by the absence pass.
     timestamp: Mapped[dt.datetime] = mapped_column(
-        "timestamp",
-        TIMESTAMP(timezone=False),
-        nullable=False,
-        server_default=text("CURRENT_TIMESTAMP"),
+        "timestamp", TIMESTAMP(timezone=False), nullable=False, server_default=_NOW
     )
-    #: Highest recognition confidence observed across the session's capture
-    #: intervals (``ABSENT_CONFIDENCE`` for absent rows).
+    #: Highest confidence observed across the session (ABSENT_CONFIDENCE if absent).
     confidence: Mapped[float] = mapped_column(Float, nullable=False)
     status: Mapped[str] = mapped_column(Text, nullable=False)
 

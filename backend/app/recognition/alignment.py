@@ -1,21 +1,15 @@
-"""Five-point face alignment to the ArcFace 112x112 reference frame.
+"""Five-point alignment to the ArcFace 112x112 reference frame.
 
-Enrollment and recognition must align identically, otherwise the embeddings are
-not comparable (docs/design.md, enrollment step 3). The reference landmark set
-below is the standard ArcFace/InsightFace 112x112 template.
-
-OpenCV is imported lazily: the attendance API runs without the recognition
-extra installed, and only this module needs it.
+Enrollment and recognition must align identically or the embeddings are not
+comparable, so both go through this module. The reference landmarks are the
+standard InsightFace 112x112 template.
 """
 
 from __future__ import annotations
 
-from typing import Any
-
+import cv2
 import numpy as np
 from numpy.typing import NDArray
-
-from app.core.errors import DependencyNotConfiguredError
 
 OUTPUT_SIZE = 112
 
@@ -31,23 +25,11 @@ ARCFACE_REFERENCE_LANDMARKS: NDArray[np.float32] = np.array(
 )
 
 
-def require_cv2() -> Any:
-    """Import OpenCV or fail with an actionable message."""
-    try:
-        import cv2
-    except ImportError as exc:  # pragma: no cover - depends on the install extra
-        raise DependencyNotConfiguredError(
-            "OpenCV is required for image processing. Install the recognition extra: "
-            "pip install -e '.[recognition]'."
-        ) from exc
-    return cv2
-
-
 def similarity_transform(
     landmarks: NDArray[np.float32],
     reference: NDArray[np.float32] = ARCFACE_REFERENCE_LANDMARKS,
 ) -> NDArray[np.float32]:
-    """Umeyama similarity transform (rotation + uniform scale + translation)."""
+    # Umeyama similarity transform: rotation, uniform scale and translation.
     if landmarks.shape != reference.shape:
         raise ValueError(f"expected landmarks of shape {reference.shape}, got {landmarks.shape}")
 
@@ -72,35 +54,21 @@ def similarity_transform(
     return matrix.astype(np.float32)
 
 
-def align_face(
-    image: NDArray[np.uint8],
-    landmarks: NDArray[np.float32],
-    *,
-    output_size: int = OUTPUT_SIZE,
-) -> NDArray[np.uint8]:
-    """Warp a detected face into the canonical ArcFace crop."""
-    cv2 = require_cv2()
+def align_face(image: NDArray[np.uint8], landmarks: NDArray[np.float32]) -> NDArray[np.uint8]:
+    # Warp a detected face into the canonical ArcFace crop.
     matrix = similarity_transform(landmarks)
-    if output_size != OUTPUT_SIZE:
-        matrix = matrix * (output_size / OUTPUT_SIZE)
-    return cv2.warpAffine(image, matrix, (output_size, output_size), borderValue=(0, 0, 0))
+    return cv2.warpAffine(image, matrix, (OUTPUT_SIZE, OUTPUT_SIZE), borderValue=(0, 0, 0))
 
 
 def decode_image(payload: bytes) -> NDArray[np.uint8]:
-    """Decode bytes into a BGR image, rejecting anything OpenCV cannot read.
-
-    A file is never trusted because of its extension (docs/design.md, step 1).
-    """
-    cv2 = require_cv2()
-    buffer = np.frombuffer(payload, dtype=np.uint8)
-    image = cv2.imdecode(buffer, cv2.IMREAD_COLOR)
+    # Decode bytes to BGR; a file is never trusted because of its extension.
+    image = cv2.imdecode(np.frombuffer(payload, dtype=np.uint8), cv2.IMREAD_COLOR)
     if image is None:
         raise ValueError("image could not be decoded")
     return image
 
 
 def blur_variance(aligned_face: NDArray[np.uint8]) -> float:
-    """Variance of the Laplacian -- lower means blurrier."""
-    cv2 = require_cv2()
+    # Variance of the Laplacian; lower means blurrier.
     grey = cv2.cvtColor(aligned_face, cv2.COLOR_BGR2GRAY)
     return float(cv2.Laplacian(grey, cv2.CV_64F).var())

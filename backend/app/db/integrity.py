@@ -1,8 +1,7 @@
 """Translate PostgreSQL constraint violations into domain errors.
 
-Doing this by constraint name (instead of a pre-flight SELECT) keeps writes to a
-single statement and stays correct under concurrency: the database is the only
-arbiter of uniqueness.
+Mapping by constraint name instead of a pre-flight SELECT keeps writes to a
+single statement and stays correct under concurrency.
 """
 
 from __future__ import annotations
@@ -16,6 +15,7 @@ from app.core.errors import ConflictError, InvalidRequestError
 
 
 def constraint_name(error: IntegrityError) -> str | None:
+    # asyncpg reports the violated constraint on the wrapped driver exception.
     cause = getattr(error, "orig", None)
     for candidate in (cause, getattr(cause, "__cause__", None)):
         name = getattr(candidate, "constraint_name", None)
@@ -26,7 +26,7 @@ def constraint_name(error: IntegrityError) -> str | None:
 
 @asynccontextmanager
 async def integrity_guard(messages: Mapping[str, str]) -> AsyncIterator[None]:
-    """Map ``{constraint_name: user_message}``; unknown violations become 422."""
+    # Map {constraint_name: message}; unrecognised violations become 422.
     try:
         yield
     except IntegrityError as exc:
@@ -35,6 +35,5 @@ async def integrity_guard(messages: Mapping[str, str]) -> AsyncIterator[None]:
         if message:
             raise ConflictError(message, details={"constraint": name}) from exc
         raise InvalidRequestError(
-            "The request violates a database constraint.",
-            details={"constraint": name, "driver_error": str(exc.orig)},
+            "The request violates a database constraint.", details={"constraint": name}
         ) from exc

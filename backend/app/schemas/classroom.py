@@ -1,3 +1,5 @@
+"""Classroom wire format."""
+
 from __future__ import annotations
 
 import uuid
@@ -8,10 +10,10 @@ from app.schemas.common import ApiModel
 
 
 class ClassroomCreate(ApiModel):
-    class_name: str = Field(min_length=1, max_length=120, examples=["CSE-A"])
-    department: str = Field(min_length=1, max_length=120, examples=["Computer Science"])
+    class_name: str = Field(min_length=1, max_length=120)
+    department: str = Field(min_length=1, max_length=120)
     semester: int = Field(ge=1, le=12)
-    strength: int = Field(ge=0, description="Declared class strength as recorded by the admin.")
+    strength: int = Field(ge=0)
 
 
 class ClassroomRead(ApiModel):
@@ -23,7 +25,5 @@ class ClassroomRead(ApiModel):
 
 
 class ClassroomDetail(ClassroomRead):
-    roster_count: int = Field(
-        description="Students currently assigned to this classroom. Attendance maths uses this, "
-        "not `strength`; a mismatch means the roster import is incomplete."
-    )
+    #: Students currently assigned. Attendance maths uses this, not `strength`.
+    roster_count: int

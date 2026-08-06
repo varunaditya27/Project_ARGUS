@@ -69,14 +69,12 @@ and needs no redeploy of the frontend:
 ```json
 {
   "components": [
-    {"name": "face_detector", "configured": true, "adapter": "scrfd-onnx", "detail": "det_10g.onnx providers=['CPUExecutionProvider'] loaded=true score>=0.5 nms_iou=0.4"},
-    {"name": "face_embedder", "configured": true, "adapter": "arcface-onnx", "detail": "w600k_r50.onnx providers=['CPUExecutionProvider'] loaded=true dim=512"},
-    {"name": "mask_synthesizer", "configured": true, "adapter": "geometric-aligned-frame", "detail": "variants=['surgical_blue', ...]"},
-    {"name": "template_index", "configured": false, "adapter": "placeholder", "detail": "set ARGUS_CHROMA_MODE"}
+    {"name": "face_detector", "configured": true, "detail": "det_10g.onnx providers=['CPUExecutionProvider'] loaded=true"},
+    {"name": "face_embedder", "configured": true, "detail": "w600k_r50.onnx providers=['CPUExecutionProvider'] loaded=true"},
+    {"name": "mask_synthesizer", "configured": true, "detail": "variants=['surgical_blue', ...]"},
+    {"name": "template_index", "configured": false, "detail": "not configured; set ARGUS_CHROMA_MODE=persistent|http"}
   ],
-  "thresholds": {"match_threshold": null, "review_threshold": null, "minimum_margin": null, "calibrated": false},
-  "embedding_dim": 512,
-  "mask_variants": ["surgical_blue", "surgical_white", "cloth_black", "cloth_colored", "n95", "improper_low"],
+  "thresholds": {"match_threshold": null, "review_threshold": null, "minimum_margin": null},
   "recognition_ready": false
 }
 ```
@@ -93,7 +91,6 @@ every component is configured *and* the thresholds are calibrated.
 | Method | Path | Purpose |
 |---|---|---|
 | `GET` | `/health` | `200` when PostgreSQL and Chroma are both reachable, `503` with a per-dependency reason otherwise |
-| `GET` | `/runtime` | Uptime, capture interval, how much attendance is buffered but not yet written |
 | `GET` | `/models` | Component wiring and threshold calibration state |
 
 ### 3.2 Classrooms
@@ -215,11 +212,8 @@ To find the current lecture: `GET /sessions?class_id=...&status=ACTIVE`.
   "session_id": "00000000-0000-0000-0000-000000000000",
   "session_status": "ACTIVE",
   "roster_count": 20000,        // students actually assigned to the classroom
-  "declared_strength": 20000,   // classrooms.strength
   "present": 7930,
-  "absent": 0,                  // stays 0 until the session is closed
-  "unrecorded": 12070,          // roster members not seen yet
-  "pending_observations": 12    // buffered in this worker, not written yet
+  "absent": 0                   // stays 0 until the session is closed
 }
 ```
 
@@ -229,9 +223,8 @@ Field semantics worth wiring into the UI correctly:
   use it for late arrivals, not as "last seen".
 - `confidence` is the **highest** similarity observed during the session.
 - `absent: 0` while `session_status` is `ACTIVE` is correct, not a bug: absence
-  is derived at close. Show `unrecorded` as "not seen yet", never as "absent".
-- `pending_observations` counts what one worker has buffered; with several
-  workers it is per-worker, so treat it as a liveness hint rather than a total.
+  is derived at close. Show `roster_count - present` as "not seen yet", never as
+  "absent".
 
 ### 3.6 Closing a session
 
@@ -240,11 +233,9 @@ Field semantics worth wiring into the UI correctly:
 {
   "session_id": "00000000-0000-0000-0000-000000000000",
   "closed_at": "2026-08-06T10:00:03.117000",
-  "flushed_observations": 12,  // written from the buffer during close
   "present": 7930,
   "absent_marked": 12070,      // Absent rows created by this close
-  "roster_count": 20000,
-  "total_recorded": 20000
+  "roster_count": 20000
 }
 ```
 
@@ -278,9 +269,7 @@ Both return the same per-face payload:
 
 ```jsonc
 {
-  "request_id": "req-0a1b2c3d4e5f",
   "frame_id": "frame-000042",
-  "latency_ms": 0.0,
   "session_id": "00000000-0000-0000-0000-000000000000",
   "faces": [
     {
@@ -289,14 +278,8 @@ Both return the same per-face payload:
       "state": "MATCH",                 // MATCH | HUMAN_REVIEW | UNKNOWN
       "student_id": "00000000-0000-0000-0000-000000000000",
       "similarity": 0.71,
-      "second_best_similarity": 0.57,
-      "margin": 0.14,
-      "matched_template": "surgical_blue",
       "reason": "Similarity and identity margin passed the calibrated thresholds.",
-      "attendance_recorded": true,
-      "candidates": [
-        {"student_id": "00000000-0000-0000-0000-000000000000", "similarity": 0.71, "matched_template": "surgical_blue"}
-      ]
+      "attendance_recorded": true
     }
   ]
 }
@@ -336,15 +319,13 @@ server. Both routes return the same shape:
 ```jsonc
 {
   "session_id": "00000000-0000-0000-0000-000000000000",
-  "items_processed": 240,      // frames sampled, or images read from the archive
-  "items_skipped": 3,          // undecodable entries, reported in `skipped`
+  "processed": 240,              // frames sampled, or images read from the archive
+  "skipped": 3,                  // undecodable entries
   "faces_detected": 812,
-  "matches": 0,                // 0 while the thresholds are uncalibrated
-  "students_recognised": [],   // distinct student_ids that reached MATCH
-  "attendance_recorded": 0,
-  "duration_ms": 18420,
-  "items": [ /* per-item detail, capped */ ],
-  "skipped": [{"name": "notes.png", "reason": "not a decodable image"}]
+  "matched": 0,                  // 0 while the thresholds are uncalibrated
+  "human_review": 812,
+  "unknown": 0,
+  "attendance_observations": 0   // distinct students handed to the capture buffer
 }
 ```
 
@@ -359,12 +340,12 @@ fails with `422` rather than being partially processed.
 
 **Attendance dashboard.** Resolve the ACTIVE session
 (`GET /sessions?class_id=...&status=ACTIVE`), poll
-`GET /sessions/{id}/attendance/summary` every few seconds - align the interval
-with `capture_interval_seconds` from `GET /runtime` - and load the register with
-keyset paging. Present rows appear progressively while the lecture runs.
+`GET /sessions/{id}/attendance/summary` every few seconds - roughly the
+deployment's `ARGUS_CAPTURE_INTERVAL_SECONDS` - and load the register with keyset
+paging. Present rows appear progressively while the lecture runs.
 
 **Closing.** Call `POST /sessions/{id}/close` once, display the report, then
-refresh the register: `unrecorded` becomes 0 and `absent` becomes non-zero.
+refresh the register: `present + absent` now equals `roster_count`.
 
 **Enrollment, one student.** Upload the photograph to R2, `POST /students` with
 the URL, then `POST /students/{id}/enroll` with the image. Handle `503` from the

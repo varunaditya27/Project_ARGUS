@@ -7,10 +7,9 @@ import uuid
 
 import pytest
 
-from app.attendance.buffer import ObservationBuffer
-from app.attendance.flusher import IntervalFlusher
 from app.core.errors import CapacityExceededError
-from app.domain.observation import Observation
+from app.domain import Observation
+from app.services.capture import IntervalFlusher, ObservationBuffer
 
 SESSION = uuid.uuid4()
 STUDENT = uuid.uuid4()
@@ -66,12 +65,6 @@ async def test_buffer_is_bounded() -> None:
         await buffer.record(uuid.uuid4(), [observation(STUDENT, 0.7, 0)])
 
 
-async def test_stats_report_pending_work() -> None:
-    buffer = ObservationBuffer(max_sessions=4)
-    await buffer.record(SESSION, [observation(uuid.uuid4(), 0.7, 0) for _ in range(3)])
-    assert await buffer.stats() == {"buffered_sessions": 1, "pending_observations": 3}
-
-
 async def test_flusher_persists_each_buffered_session() -> None:
     buffer = ObservationBuffer(max_sessions=4)
     persisted: list[tuple[uuid.UUID, int]] = []
@@ -87,7 +80,7 @@ async def test_flusher_persists_each_buffered_session() -> None:
     flusher = IntervalFlusher(buffer=buffer, persist=persist, interval_seconds=0.01)
     assert await flusher.flush_once() == 2
     assert sorted(persisted) == sorted([(SESSION, 1), (other_session, 1)])
-    assert (await buffer.stats())["pending_observations"] == 0
+    assert await buffer.drain_all() == []
 
 
 async def test_failed_flush_requeues_instead_of_losing_attendance() -> None:
@@ -100,4 +93,4 @@ async def test_failed_flush_requeues_instead_of_losing_attendance() -> None:
     flusher = IntervalFlusher(buffer=buffer, persist=failing_persist, interval_seconds=0.01)
 
     assert await flusher.flush_once() == 0
-    assert (await buffer.stats())["pending_observations"] == 1
+    assert len(await buffer.drain(SESSION)) == 1

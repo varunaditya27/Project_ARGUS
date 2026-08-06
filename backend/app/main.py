@@ -8,14 +8,12 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api.v1.router import api_router
+from app.api.router import api_router
 from app.container import build_container
 from app.core.config import Settings, get_settings
 from app.core.errors import register_exception_handlers
-from app.core.logging import configure_logging, get_logger
+from app.core.logging import configure_logging
 from app.schemas.common import ErrorResponse
-
-logger = get_logger(__name__)
 
 DESCRIPTION = """
 Attendance backend for Project ARGUS.
@@ -23,15 +21,15 @@ Attendance backend for Project ARGUS.
 * Attendance is captured **while the session is ACTIVE**: recognitions are
   coalesced per capture interval and written continuously.
 * Absence is derived **once, when the session is closed** - every roster member
-  without an attendance row becomes `Absent` in a single set-based statement.
-* Recognition endpoints return `503` until the SCRFD/ArcFace/MaskTheFace
-  adapters and the calibrated thresholds are in place; they never return
-  fabricated identities.
+  without an attendance row becomes `Absent` in a single statement.
+* Recognition endpoints return `503` until the ONNX models, ChromaDB and the
+  calibrated thresholds are in place; they never return a fabricated identity.
 """
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    # Warm the models and run the flusher for the lifetime of the process.
     container = app.state.container
     await container.startup()
     try:
@@ -41,6 +39,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
+    # Build the application; tests pass their own settings.
     settings = settings or get_settings()
     configure_logging(settings.log_level, as_json=settings.log_json)
 
@@ -66,7 +65,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         )
 
     register_exception_handlers(app)
-    app.include_router(api_router, prefix=settings.api_v1_prefix)
+    app.include_router(api_router, prefix=settings.api_prefix)
     return app
 
 

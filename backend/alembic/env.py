@@ -14,8 +14,7 @@ from sqlalchemy.pool import NullPool
 
 from alembic import context
 from app.core.config import get_settings
-from app.db import models  # noqa: F401 - imported for metadata registration
-from app.db.base import Base
+from app.db.models import Base
 
 config = context.config
 if config.config_file_name is not None:

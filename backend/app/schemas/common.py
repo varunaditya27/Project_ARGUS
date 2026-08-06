@@ -1,3 +1,5 @@
+"""Shared API model base, page envelopes and the error envelope."""
+
 from __future__ import annotations
 
 from typing import Generic, TypeVar
@@ -11,17 +13,14 @@ DEFAULT_PAGE_SIZE = 50
 
 
 class ApiModel(BaseModel):
-    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
+    model_config = ConfigDict(from_attributes=True)
 
 
 class KeysetPage(BaseModel, Generic[T]):
-    """Cursor page. ``next_cursor`` is the value to pass back as ``after``."""
+    """Cursor page; next_cursor is the value to pass back as `after`."""
 
     items: list[T]
-    next_cursor: int | None = Field(
-        default=None,
-        description="Pass as `after` to fetch the following page; null when exhausted.",
-    )
+    next_cursor: int | None = None
 
 
 class OffsetPage(BaseModel, Generic[T]):

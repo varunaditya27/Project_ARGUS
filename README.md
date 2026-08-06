@@ -230,7 +230,7 @@ The attendance backend (FastAPI + PostgreSQL + ChromaDB) lives in [`backend/`](b
 | [`docs/api_integration.md`](docs/api_integration.md) | HTTP/WebSocket contract for the frontend and recognition clients |
 | [`docs/benchmarks.md`](docs/benchmarks.md) | Measured attendance and vector-search performance at 20 000 students |
 
-The recognition components (SCRFD, ArcFace, MaskTheFace) are placeholder adapters that return `503` until the models are implemented; the backend never returns fabricated recognition results.
+The recognition components run on `onnxruntime` against the InsightFace `buffalo_l` pack (SCRFD detection, ArcFace embeddings, geometric mask synthesis, ChromaDB index). Any component without a configured model file answers `503` naming the missing setting; the backend never returns fabricated recognition results.
 
 ---
 
@@ -326,9 +326,10 @@ This measures the degradation caused by facial occlusion.
 | Dataset Study | Done |
 | Architecture Design | Done |
 | Attendance Backend | Done |
+| Model Adapters (SCRFD / ArcFace / mask synthesis) | Done |
 | Baseline Pipeline | In Progress |
 | Evaluation Pipeline | In Progress |
-| Model Adapters (SCRFD / ArcFace / MaskTheFace) | Planned |
+| Threshold Calibration | Planned |
 | Enhancement Pipeline | Planned |
 | Frontend | Planned |
 | Live Demo | Planned |
