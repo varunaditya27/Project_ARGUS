@@ -22,7 +22,10 @@ from app.schemas.classroom import ClassroomCreate
 from app.schemas.session import SessionCreate
 from app.schemas.student import StudentCreate
 
-TEST_DATABASE_URL = os.getenv("ARGUS_TEST_DATABASE_URL")
+TEST_DATABASE_URL = os.getenv(
+    "ARGUS_TEST_DATABASE_URL",
+    "postgresql+asyncpg://argus:argus@localhost:5432/argus_test",
+)
 
 requires_database = pytest.mark.skipif(
     not TEST_DATABASE_URL,
