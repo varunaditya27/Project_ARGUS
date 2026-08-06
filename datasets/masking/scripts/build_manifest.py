@@ -1,21 +1,4 @@
-"""
-Walks every image source we care about and writes one flat CSV describing
-every image: which dataset it's from, whose face it is, whether it's
-masked, which tool made the mask (if any), and the mask type.
-
-This is what embeddings/ and evaluation/ read from - they don't need to
-know about folder layouts, they just read rows out of this file.
-
-Run after select_reduced_scope.py, run_masktheface.py and run_rwmfd.py
-have all finished.
-
-Scope note: MaskTheFace ran over the full 1,680-identity LFW_subset
-before we realized the embedding step couldn't keep up with that volume
-on this machine (see select_reduced_scope.py). Rather than redo the
-masking, we just filter its output down to the same 400-identity /
-1,160-image slice everything else uses, and only keep 5 of its 9 mask
-types to match the reduced time budget.
-"""
+"""Walks every image source and writes one flat CSV: dataset, identity, mask type, is_masked."""
 
 import csv
 import os
@@ -33,6 +16,7 @@ FIELDS = ["dataset", "identity", "filename", "path", "source_tool", "mask_type",
 KEEP_MASKTHEFACE_TYPES = {"surgical", "surgical_blue", "N95", "KN95", "cloth"}
 
 
+# yields (identity, filename, path) for every image under an identity-subfoldered directory
 def walk_flat_images(root_dir):
     for identity in sorted(os.listdir(root_dir)):
         identity_dir = os.path.join(root_dir, identity)
@@ -42,11 +26,13 @@ def walk_flat_images(root_dir):
             yield identity, filename, os.path.join(identity_dir, filename)
 
 
+# set of (identity, filename) pairs that made it into the 400-identity reduced scope
 def load_reduced_scope():
     with open(REDUCED_MANIFEST_PATH, newline="") as f:
         return {(row["identity"], row["filename"]) for row in csv.DictReader(f)}
 
 
+# unmasked LFW images, filtered down to the reduced scope
 def rows_from_lfw_gallery(reduced_scope):
     rows = []
     for identity, filename, path in walk_flat_images(LFW_SUBSET_DIR):
@@ -57,12 +43,11 @@ def rows_from_lfw_gallery(reduced_scope):
     return rows
 
 
+# masked LFW images, parsing mask type out of filenames like Aaron_Peirsol_0001_surgical_blue.jpg
 def rows_from_masktheface(reduced_scope):
     rows = []
     for identity, filename, path in walk_flat_images(LFW_MTF_DIR):
         stem = os.path.splitext(filename)[0]
-        # filenames look like Aaron_Peirsol_0001_surgical_blue.jpg, so the
-        # mask type is everything after the 4-digit numeric suffix.
         parts = stem.split("_")
         mask_type = "unknown"
         base_filename = None
@@ -80,6 +65,7 @@ def rows_from_masktheface(reduced_scope):
     return rows
 
 
+# RWMFD-masked images, parsing the color variant out of the filename suffix
 def rows_from_rwmfd():
     rows = []
     for identity, filename, path in walk_flat_images(LFW_RWMFD_DIR):
@@ -91,6 +77,7 @@ def rows_from_rwmfd():
     return rows
 
 
+# maps (identity, image index) -> mask type from mfr2_labels.txt
 def read_mfr2_labels():
     labels = {}
     with open(MFR2_LABELS_PATH) as f:
@@ -100,6 +87,7 @@ def read_mfr2_labels():
     return labels
 
 
+# MFR2's real masked/unmasked images, labeled from mfr2_labels.txt
 def rows_from_mfr2():
     labels = read_mfr2_labels()
     rows = []
@@ -115,6 +103,7 @@ def rows_from_mfr2():
     return rows
 
 
+# writes the combined rows from all four sources out as one csv
 def write_manifest(rows):
     with open(OUT_PATH, "w", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=FIELDS)

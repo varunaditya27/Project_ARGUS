@@ -1,8 +1,12 @@
+"""Rank-1 identification and verification (ROC-AUC / TAR@FAR) math on cosine-similarity scores."""
+
 import numpy as np
 from sklearn.metrics import roc_curve, auc as sklearn_auc
 
 BATCH_SIZE = 1000
 
+
+# for each probe, checks if its nearest gallery neighbour is the correct identity
 def rank1_accuracy(gallery_emb, gallery_ids, probe_emb, probe_ids):
     correct = 0
     for start in range(0, len(probe_emb), BATCH_SIZE):
@@ -14,6 +18,7 @@ def rank1_accuracy(gallery_emb, gallery_ids, probe_emb, probe_ids):
     return correct / len(probe_emb)
 
 
+# collects genuine (same-identity) and sampled impostor (different-identity) similarity scores
 def verification_scores(gallery_emb, gallery_ids, probe_emb, probe_ids, n_impostor_samples=50, seed=42):
     rng = np.random.default_rng(seed)
     genuine_scores = []
@@ -40,6 +45,7 @@ def verification_scores(gallery_emb, gallery_ids, probe_emb, probe_ids, n_impost
     return np.array(genuine_scores), np.array(impostor_scores)
 
 
+# computes ROC-AUC and true-accept-rate at each target false-accept-rate
 def roc_auc_and_tar(genuine_scores, impostor_scores, far_targets=(0.01, 0.05, 0.1)):
     labels = np.concatenate([np.ones_like(genuine_scores), np.zeros_like(impostor_scores)])
     scores = np.concatenate([genuine_scores, impostor_scores])

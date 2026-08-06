@@ -1,15 +1,4 @@
-"""
-Turns the flat embeddings.npz into the gallery/probe splits the rubric
-actually asks for:
-
-  - gallery: one unmasked embedding per identity (the "enrollment photo")
-  - unmasked probes: the other unmasked photos of that identity
-  - masked probes: every synthetic/real masked embedding for that identity
-
-We never let a probe row also be the gallery row for that identity, but a
-masked embedding *derived from* the gallery photo is still a fair probe -
-it's a different (occluded) embedding, not the same vector.
-"""
+"""Splits embeddings.npz into gallery (one unmasked photo per identity), unmasked probes, and masked probes."""
 
 import numpy as np
 
@@ -17,14 +6,17 @@ LFW_UNMASKED_TYPE = "unmasked"
 MFR2_UNMASKED_TYPE = "no-mask"
 
 
+# loads the npz file produced by build_embeddings.py
 def load(npz_path):
     return np.load(npz_path)
 
 
+# boolean mask for rows belonging to one dataset (lfw_subset or mfr2)
 def dataset_mask(data, dataset_name):
     return data["dataset"] == dataset_name
 
 
+# picks one unmasked embedding per identity to act as the enrollment photo
 def pick_gallery(data, dataset_name, unmasked_label):
     mask = dataset_mask(data, dataset_name) & (data["mask_type"] == unmasked_label)
     identities = data["identity"][mask]
@@ -44,17 +36,20 @@ def pick_gallery(data, dataset_name, unmasked_label):
     return gallery_ids, gallery_emb, gallery_paths
 
 
+# the remaining unmasked photos per identity, excluding whichever one became the gallery photo
 def unmasked_probes(data, dataset_name, unmasked_label, gallery_paths):
     mask = dataset_mask(data, dataset_name) & (data["mask_type"] == unmasked_label)
     mask &= ~np.isin(data["path"], gallery_paths)
     return data["identity"][mask], data["embedding"][mask]
 
 
+# every masked embedding for a dataset, with its mask type and which tool generated it
 def masked_probes(data, dataset_name):
     mask = dataset_mask(data, dataset_name) & (data["is_masked"] == 1)
     return data["identity"][mask], data["embedding"][mask], data["mask_type"][mask], data["source_tool"][mask]
 
 
+# builds the full gallery/unmasked-probe/masked-probe split for LFW_subset
 def build_lfw_sets(data):
     gallery_ids, gallery_emb, gallery_paths = pick_gallery(data, "lfw_subset", LFW_UNMASKED_TYPE)
     probe_ids_unmasked, probe_emb_unmasked = unmasked_probes(data, "lfw_subset", LFW_UNMASKED_TYPE, gallery_paths)
@@ -67,6 +62,7 @@ def build_lfw_sets(data):
     }
 
 
+# builds the full gallery/unmasked-probe/masked-probe split for MFR2
 def build_mfr2_sets(data):
     gallery_ids, gallery_emb, gallery_paths = pick_gallery(data, "mfr2", MFR2_UNMASKED_TYPE)
     probe_ids_unmasked, probe_emb_unmasked = unmasked_probes(data, "mfr2", MFR2_UNMASKED_TYPE, gallery_paths)

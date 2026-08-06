@@ -1,10 +1,4 @@
-"""
-Picks out the LFW identities that actually have >=2 images (need that many
-for verification pairs and rank-1 gallery/probe splits) and lays them out
-in a fresh folder as symlinks so MaskTheFace can walk it directly.
-
-Run this once before run_masktheface.py / run_rwmfd.py.
-"""
+"""Filters LFW down to identities with >=2 images and symlinks them into LFW_subset/."""
 
 import csv
 import os
@@ -17,6 +11,7 @@ MANIFEST_PATH = os.path.join(BASE_DIR, "datasets", "processed", "LFW_subset_mani
 MIN_IMAGES_PER_IDENTITY = 2
 
 
+# returns (name, image_list) pairs for every identity with enough images
 def list_identities_with_min_images(src_dir, min_images):
     identities = []
     for name in sorted(os.listdir(src_dir)):
@@ -29,6 +24,7 @@ def list_identities_with_min_images(src_dir, min_images):
     return identities
 
 
+# symlinks each kept image into LFW_subset/ and builds the manifest rows
 def build_subset(identities):
     os.makedirs(SUBSET_DIR, exist_ok=True)
     rows = []
@@ -44,6 +40,7 @@ def build_subset(identities):
     return rows
 
 
+# writes the identity/filename/path rows out as csv
 def write_manifest(rows):
     with open(MANIFEST_PATH, "w", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=["identity", "filename", "path"])

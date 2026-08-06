@@ -1,19 +1,11 @@
-"""
-Covers AT-02 from docs/testplan.md ("Generate masks using MaskTheFace and
-RWMFD - configured mask variants are created and linked to the same
-identity") at the manifest level: given files already on disk, does
-build_manifest.py correctly recover which identity, which mask type, and
-whether it's masked, purely from folder/file naming.
-
-These only touch filenames, not image content, so fixtures are empty
-files - no real images needed.
-"""
+"""Tests for build_manifest.py's filename parsing - covers AT-02 from docs/testplan.md."""
 
 import os
 
 from datasets.masking.scripts import build_manifest as bm
 
 
+# creates an empty file at path, making parent dirs as needed
 def touch(path):
     os.makedirs(os.path.dirname(path), exist_ok=True)
     open(path, "w").close()

@@ -1,14 +1,4 @@
-"""
-Integration test - this one loads the real buffalo_l model and runs real
-inference, unlike the other test files which are pure logic. Slower
-(a few seconds for model load) but it's the only place we actually check
-the ArcFace wrapper end to end rather than assuming it works.
-
-Covers docs/testplan.md's AT-03 (no face -> rejected, not crashed) and
-AT-05 (damaged/unsupported file -> rejected without crashing) at the
-embedding-generation level, ahead of there being an actual enrollment
-endpoint to test those against.
-"""
+"""Integration test for embeddings/generate.py - loads the real model, covers testplan.md's AT-03/AT-05."""
 
 import numpy as np
 import cv2

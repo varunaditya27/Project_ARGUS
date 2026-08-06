@@ -1,12 +1,4 @@
-"""
-Reads datasets/processed/full_manifest.csv (built by build_manifest.py) and runs
-every image through ArcFace, saving all embeddings + their metadata into
-one npz file so evaluation/ doesn't need to touch the model at all.
-
-This is the slow step (CPU inference per face), so it prints progress
-and can be safely re-run - already-embedded rows are not recomputed if
-you rerun with --resume against a previous output file.
-"""
+"""Runs every image in full_manifest.csv through ArcFace and saves embeddings + metadata to embeddings.npz."""
 
 import argparse
 import csv
@@ -23,11 +15,13 @@ MANIFEST_PATH = os.path.join(BASE_DIR, "datasets", "processed", "full_manifest.c
 DEFAULT_OUT_PATH = os.path.join(BASE_DIR, "embeddings", "embeddings.npz")
 
 
+# loads the manifest rows we need to embed
 def read_manifest(path):
     with open(path, newline="") as f:
         return list(csv.DictReader(f))
 
 
+# builds a path -> embedding lookup from a previous run, used by --resume to skip work
 def load_existing(out_path):
     if not os.path.exists(out_path):
         return {}
@@ -37,6 +31,7 @@ def load_existing(out_path):
     return {p: e for p, e in zip(paths, embeddings)}
 
 
+# embeds every manifest row not already in existing, then writes the combined result
 def build(manifest_path, out_path, resume):
     rows = read_manifest(manifest_path)
     existing = load_existing(out_path) if resume else {}
@@ -65,6 +60,7 @@ def build(manifest_path, out_path, resume):
     print(f"done: {len(kept_rows)} embeddings saved, {skipped_no_face} skipped")
 
 
+# writes rows + embeddings out as one compressed npz, arrays aligned by index
 def save(rows, embeddings, out_path):
     np.savez_compressed(
         out_path,

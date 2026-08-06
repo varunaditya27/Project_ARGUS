@@ -1,14 +1,11 @@
-"""
-evaluation/metrics.py is pure math with no I/O, so every scenario here is
-synthetic - the point is to check the math is right, not to re-test that
-numpy works.
-"""
+"""Tests for evaluation/metrics.py's rank-1 and verification math, all on synthetic vectors."""
 
 import numpy as np
 
 from evaluation import metrics
 
 
+# random unit vectors, standing in for L2-normalized ArcFace embeddings
 def unit_vectors(n, dim=512, seed=0):
     rng = np.random.default_rng(seed)
     vectors = rng.normal(size=(n, dim))

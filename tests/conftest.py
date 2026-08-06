@@ -1,3 +1,5 @@
+"""Shared pytest fixtures: a real sample face image, and a synthetic embeddings.npz-like dict."""
+
 import os
 
 import numpy as np
@@ -6,25 +8,21 @@ import pytest
 FIXTURES_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fixtures")
 
 
+# path to a real jpg for the integration test
 @pytest.fixture
 def sample_face_path():
     return os.path.join(FIXTURES_DIR, "sample_face.jpg")
 
 
+# 10 identities, each with a base embedding, a lightly-perturbed unmasked probe, and a masked probe
 @pytest.fixture
 def synthetic_embeddings():
-    """
-    Builds a small, deterministic set of embeddings that behaves like a
-    real embeddings.npz would: distinct random unit vectors per identity,
-    each with a lightly-perturbed unmasked probe and a heavily-perturbed
-    masked probe, so rank-1/verification math has something real to
-    separate rather than degenerate all-identical vectors.
-    """
     rng = np.random.default_rng(0)
     identities = [f"person_{i}" for i in range(10)]
 
     paths, dataset, identity, source_tool, mask_type, is_masked, embedding = [], [], [], [], [], [], []
 
+    # appends one row's fields to the parallel lists above, normalizing the embedding as it goes
     def add_row(path, ident, tool, mtype, masked, vector):
         paths.append(path)
         dataset.append("lfw_subset")

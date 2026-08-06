@@ -1,26 +1,16 @@
-"""
-The actual headline numbers for the hackathon rubric: rank-1 identification
-and verification accuracy (ROC-AUC, TAR@FAR) for masked-probe-vs-unmasked-
-gallery, next to the unmasked-vs-unmasked baseline, on both LFW_subset
-(synthetic masks) and MFR2 (real masked photos).
-
-Run after embeddings/build_embeddings.py has produced embeddings.npz.
-"""
+"""Computes rank-1 and verification accuracy for masked-vs-unmasked-gallery on LFW_subset and MFR2."""
 
 import json
 import os
-import sys
 import eval_sets
 import metrics
-
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 EMBEDDINGS_PATH = os.path.join(BASE_DIR, "embeddings", "embeddings.npz")
 RESULTS_PATH = os.path.join(BASE_DIR, "evaluation", "results.json")
 
 
+# rank-1 + verification metrics for one gallery/probe split, or None if the probe set is empty
 def evaluate_split(gallery_ids, gallery_emb, probe_ids, probe_emb):
     if len(probe_ids) == 0:
         return None
@@ -35,6 +25,7 @@ def evaluate_split(gallery_ids, gallery_emb, probe_ids, probe_emb):
     }
 
 
+# same as evaluate_split but broken out per mask type, for the robustness-across-mask-types comparison
 def evaluate_by_mask_type(gallery_ids, gallery_emb, probe_ids, probe_emb, mask_types):
     results = {}
     for mask_type in sorted(set(mask_types.tolist())):
@@ -45,6 +36,7 @@ def evaluate_by_mask_type(gallery_ids, gallery_emb, probe_ids, probe_emb, mask_t
     return results
 
 
+# prints and returns baseline/masked/per-mask-type results for one dataset's gallery/probe sets
 def report_for_dataset(name, sets):
     print(f"\n=== {name} ===")
     print(f"gallery size (identities): {len(sets['gallery_ids'])}")
@@ -76,6 +68,7 @@ def report_for_dataset(name, sets):
     }
 
 
+# runs the full LFW_subset + MFR2 evaluation and writes results.json
 def run():
     data = eval_sets.load(EMBEDDINGS_PATH)
     lfw_sets = eval_sets.build_lfw_sets(data)

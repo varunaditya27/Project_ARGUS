@@ -1,17 +1,4 @@
-"""
-The full LFW_subset (1,680 identities) is too big to push through RWMFD
-and ArcFace embedding on this machine in reasonable time (see the timing
-numbers we hit: ~1.2s/image under memory pressure, and RWMFD re-detects
-per mask color so it's the slow one). This carves out a smaller, still
-useful slice: first 400 identities alphabetically, capped at 4 images
-each, so no single celebrity with hundreds of photos skews the eval.
-
-MaskTheFace has already run over the full LFW_subset, so its output for
-these 400 identities already exists - this script only decides which
-rows from that existing manifest we bother running RWMFD on and later
-feed into embedding extraction. Nothing gets regenerated for the part
-that's already done.
-"""
+"""Cuts LFW_subset down to the first 400 identities, max 4 images each, for RWMFD/embedding."""
 
 import csv
 import os
@@ -25,11 +12,13 @@ MAX_IDENTITIES = 400
 MAX_IMAGES_PER_IDENTITY = 4
 
 
+# loads the full 1,680-identity manifest select_subset.py already wrote
 def read_full_manifest():
     with open(FULL_MANIFEST_PATH, newline="") as f:
         return list(csv.DictReader(f))
 
 
+# keeps only the first 400 identities (alphabetical) capped at 4 images each
 def reduce_rows(rows):
     by_identity = defaultdict(list)
     for row in rows:
@@ -43,6 +32,7 @@ def reduce_rows(rows):
     return reduced
 
 
+# writes the reduced identity/filename/path rows out as csv
 def write_manifest(rows):
     with open(REDUCED_MANIFEST_PATH, "w", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=["identity", "filename", "path"])

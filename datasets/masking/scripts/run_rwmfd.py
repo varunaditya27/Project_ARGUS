@@ -1,16 +1,4 @@
-"""
-Runs the vendored RWMFD wear-a-mask tool over datasets/processed/LFW_reduced_manifest.csv
-(400 identities, capped at 4 images each - see select_reduced_scope.py for
-why we're not running this over the full 1,680-identity subset: this tool
-re-detects the face per mask color, benchmarked at ~0.45s/call, so the
-full subset would take ~4.6 hours here). We keep 2 of its 4 textures
-(blue, black) rather than all 4, for the same time-budget reason.
-
-Output: datasets/processed/LFW_subset_rwmfd/<identity>/<stem>_<variant>.jpg
-Note this tool also re-crops and resizes to 128x128 as part of its own
-alignment step (see wearmask.FaceMasker.mask) - that's the vendored
-tool's behaviour, not something we're choosing here.
-"""
+"""Runs the vendored RWMFD tool over LFW_reduced_manifest.csv, writing blue/black variants to LFW_subset_rwmfd/."""
 
 import csv
 import os
@@ -30,11 +18,13 @@ VARIANTS = {
 }
 
 
+# loads the reduced-scope manifest rows to run RWMFD over
 def read_manifest(path):
     with open(path, newline="") as f:
         return list(csv.DictReader(f))
 
 
+# applies both mask variants to every image, skipping ones already done
 def run():
     rows = read_manifest(MANIFEST_PATH)
     total = len(rows) * len(VARIANTS)
