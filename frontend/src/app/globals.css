@@ -1,0 +1,90 @@
+@import "tailwindcss";
+
+@layer base {
+  :root {
+    /* Core palette — institutional navy + warm stone */
+    --ink:         #0F1B35;
+    --ink-muted:   #3D4E6B;
+    --ink-faint:   #6B7B96;
+    --stone-50:    #FAFAF8;
+    --stone-100:   #F4F3F0;
+    --stone-200:   #E8E6E1;
+    --stone-300:   #D4D1CA;
+    --stone-400:   #A8A49C;
+
+    /* Accent — restrained cobalt */
+    --accent:      #2A52A3;
+    --accent-light: #EEF2FA;
+    --accent-muted: #5B7EC7;
+
+    /* Semantic status */
+    --status-present: #1A6B3C;
+    --status-present-bg: #F0FAF4;
+    --status-absent:  #7A2020;
+    --status-absent-bg: #FDF4F4;
+    --status-late:    #7A4F00;
+    --status-late-bg: #FEF9EE;
+    --status-unknown: #5A5A5A;
+    --status-unknown-bg: #F4F4F4;
+
+    --background: var(--stone-50);
+    --foreground: var(--ink);
+    --muted:      var(--ink-faint);
+    --border:     var(--stone-200);
+    --surface:    #FFFFFF;
+    --primary:    var(--ink);
+    --ring:       var(--accent);
+  }
+}
+
+/* ─── Global Reset ──────────────────────────────────────────── */
+*, *::before, *::after {
+  box-sizing: border-box;
+}
+
+html {
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+body {
+  background-color: var(--stone-50);
+  color: var(--ink);
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif;
+  font-size: 13.5px;
+  line-height: 1.6;
+  letter-spacing: -0.005em;
+}
+
+/* ─── Scrollbars ─────────────────────────────────────────────── */
+::-webkit-scrollbar {
+  width: 5px;
+  height: 5px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--stone-300);
+  border-radius: 10px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--stone-400);
+}
+
+/* ─── Selection ──────────────────────────────────────────────── */
+::selection {
+  background-color: #D6E2F8;
+  color: var(--ink);
+}
+
+/* ─── Focus ring ─────────────────────────────────────────────── */
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 3px;
+}
