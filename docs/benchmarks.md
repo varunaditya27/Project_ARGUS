@@ -162,3 +162,17 @@ similarity around **0.56-0.62** between an unmasked template and its synthetic
 masked variants, around **0.97** between two views of the same face, and around
 **0.06** against unrelated content. That is an order-of-magnitude sanity check on
 where the thresholds will land, not a substitute for calibration.
+
+`evaluation/calibrate_thresholds.py` runs exactly the steps 2-6 above against a
+real labelled probe set - LFW (400 identities) and MFR2 (53 identities), masked
+with MaskTheFace and RWMFD rather than the geometric synthesizer, gallery/probe
+split so no probe embedding is ever compared against itself. On that set it
+reports `ARGUS_MATCH_THRESHOLD≈0.14` (similarity at 1% FAR), `ARGUS_REVIEW_THRESHOLD≈0.10`
+(at 5% FAR), and `ARGUS_MINIMUM_MARGIN≈0.12` (5th percentile of the top1/top2
+margin on correct matches). These read lower than the single-portrait smoke
+test above because every probe here is masked, which pulls genuine similarity
+down versus an unmasked-to-unmasked comparison - consistent with the smoke
+test, not contradicting it. Same caveat as this section already makes: this is
+a different cohort, different mask source, and different camera conditions
+than any real deployment, so treat these as a starting point to sanity-check a
+real calibration against, not a value to paste into `.env` unexamined.
