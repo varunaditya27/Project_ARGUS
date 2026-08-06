@@ -5,12 +5,14 @@ import pytest
 from datasets.masking.scripts import run_masktheface
 
 
+# checks run() exits with a helpful message instead of a stack trace when LFW_subset/ doesn't exist yet
 def test_run_exits_clearly_when_subset_dir_is_missing(monkeypatch, tmp_path):
     monkeypatch.setattr(run_masktheface, "SUBSET_DIR", str(tmp_path / "does_not_exist"))
     with pytest.raises(SystemExit, match="run select_subset.py first"):
         run_masktheface.run()
 
 
+# regression guard: checks --color "" is always in the command, or MaskTheFace's blue-tint bug returns
 def test_run_passes_empty_color_to_override_masktheface_s_default_blue_tint(monkeypatch, tmp_path):
     monkeypatch.setattr(run_masktheface, "SUBSET_DIR", str(tmp_path))
     captured = {}

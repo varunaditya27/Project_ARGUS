@@ -11,6 +11,7 @@ def unit_vectors(n, dim=8, seed=0):
     return vectors / np.linalg.norm(vectors, axis=1, keepdims=True)
 
 
+# checks an empty probe set returns None instead of crashing on empty arrays
 def test_evaluate_split_returns_none_for_empty_probe_set():
     gallery_emb = unit_vectors(3, seed=1)
     gallery_ids = np.array(["a", "b", "c"])
@@ -18,6 +19,7 @@ def test_evaluate_split_returns_none_for_empty_probe_set():
     assert result is None
 
 
+# checks a real gallery/probe split reports the expected rank-1 accuracy and probe count
 def test_evaluate_split_reports_rank1_and_auc_for_a_real_split():
     gallery_emb = unit_vectors(3, seed=1)
     gallery_ids = np.array(["a", "b", "c"])
@@ -30,6 +32,7 @@ def test_evaluate_split_reports_rank1_and_auc_for_a_real_split():
     assert result["rank1_accuracy"] == 1.0
 
 
+# checks results are grouped correctly by mask type, one entry per type present in the probes
 def test_evaluate_by_mask_type_groups_results_and_skips_empty_groups():
     gallery_emb = unit_vectors(2, seed=2)
     gallery_ids = np.array(["a", "b"])

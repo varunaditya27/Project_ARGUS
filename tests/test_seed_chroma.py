@@ -12,6 +12,7 @@ def test_identity_uuid_is_deterministic():
     assert first == second
 
 
+# checks different identities, or the same name in a different dataset, never collide on one uuid
 def test_identity_uuid_differs_by_dataset_or_identity():
     lfw_uuid = seed_chroma.identity_uuid("lfw", "Aaron_Peirsol")
     mfr2_uuid = seed_chroma.identity_uuid("mfr2", "Aaron_Peirsol")
@@ -20,6 +21,7 @@ def test_identity_uuid_differs_by_dataset_or_identity():
     assert lfw_uuid != other_identity
 
 
+# checks every identity in the enrollment set gets exactly one UNMASKED-tagged gallery row
 def test_unmasked_rows_tags_every_identity_as_unmasked_template():
     data = {
         "dataset": np.array(["lfw", "mfr2"]),
@@ -31,6 +33,7 @@ def test_unmasked_rows_tags_every_identity_as_unmasked_template():
     assert all(mask_type == seed_chroma.UNMASKED_TEMPLATE for _, mask_type, _, _, _ in rows)
 
 
+# regression guard: reproduces the real DuplicateIDError crash - two photos, same identity, same mask type
 def test_masked_rows_deduplicates_same_identity_same_mask_type():
     # alice has two different source photos both masked as "cloth" - this is the exact
     # scenario that crashed the real seeding run with a DuplicateIDError before the fix
@@ -51,6 +54,7 @@ def test_masked_rows_deduplicates_same_identity_same_mask_type():
     assert np.array_equal(kept_embedding, data["embedding"][1])
 
 
+# checks the eval pipeline's "lfw_subset" dataset name is normalized to "lfw" to match enrollment's naming
 def test_masked_rows_maps_lfw_subset_dataset_name_to_lfw():
     data = {
         "dataset": np.array(["lfw_subset"]),
@@ -64,6 +68,7 @@ def test_masked_rows_maps_lfw_subset_dataset_name_to_lfw():
     assert rows[0][3] == "lfw"
 
 
+# checks one student_id with multiple templates gets exactly one row in the identity map, not one per template
 def test_write_identity_map_deduplicates_repeated_student_ids(tmp_path, monkeypatch):
     monkeypatch.setattr(seed_chroma, "IDENTITY_MAP_PATH", str(tmp_path / "map.csv"))
     student_id = seed_chroma.identity_uuid("lfw", "alice")

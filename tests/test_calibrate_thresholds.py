@@ -34,6 +34,7 @@ def make_data(probe_noise_scale):
     }
 
 
+# checks genuine (self-match) scores come out higher than impostor scores on well-separated data
 def test_pooled_masked_scores_separates_genuine_from_impostor_with_low_noise():
     data = make_data(probe_noise_scale=0.01)
     genuine, impostor = calibrate_thresholds.pooled_masked_scores(data)
@@ -41,6 +42,7 @@ def test_pooled_masked_scores_separates_genuine_from_impostor_with_low_noise():
     assert genuine.mean() > impostor.mean()
 
 
+# checks a target FAR of 0 gives a threshold at or above the single highest impostor score
 def test_threshold_at_far_zero_rejects_everything_below_max_impostor():
     genuine = np.array([0.9, 0.8, 0.7])
     impostor = np.array([0.1, 0.2, 0.6])
@@ -49,6 +51,7 @@ def test_threshold_at_far_zero_rejects_everything_below_max_impostor():
     assert threshold > 0.6
 
 
+# checks top1/top2 margins land in "correct" when the nearest gallery neighbour is the true identity
 def test_rank1_margins_splits_correct_and_wrong_by_top1_identity():
     data = make_data(probe_noise_scale=0.01)
     correct_margins, wrong_margins = calibrate_thresholds.rank1_margins(data)

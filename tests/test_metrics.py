@@ -12,6 +12,7 @@ def unit_vectors(n, dim=512, seed=0):
     return vectors / np.linalg.norm(vectors, axis=1, keepdims=True)
 
 
+# checks a probe close to its own gallery vector always ranks first, not a neighbour
 def test_rank1_accuracy_perfect_separation():
     gallery_emb = unit_vectors(5, seed=1)
     gallery_ids = np.array([f"id_{i}" for i in range(5)])
@@ -26,6 +27,7 @@ def test_rank1_accuracy_perfect_separation():
     assert accuracy == 1.0
 
 
+# checks a genuinely wrong nearest-neighbour match is reported as an error, not silently passed
 def test_rank1_accuracy_detects_wrong_predictions():
     gallery_emb = unit_vectors(3, seed=3)
     gallery_ids = np.array(["a", "b", "c"])
@@ -38,6 +40,7 @@ def test_rank1_accuracy_detects_wrong_predictions():
     assert accuracy == 0.5
 
 
+# checks genuine/impostor score counts and that self-similarity genuine scores are ~1.0
 def test_verification_scores_shapes_and_membership():
     gallery_emb = unit_vectors(6, seed=4)
     gallery_ids = np.array([f"id_{i}" for i in range(6)])
@@ -52,6 +55,7 @@ def test_verification_scores_shapes_and_membership():
     assert np.allclose(genuine, 1.0, atol=1e-5)
 
 
+# checks a probe whose identity isn't in the gallery is skipped, not counted as a genuine pair
 def test_verification_scores_skips_probes_with_no_gallery_match():
     gallery_emb = unit_vectors(3, seed=5)
     gallery_ids = np.array(["a", "b", "c"])
@@ -62,6 +66,7 @@ def test_verification_scores_skips_probes_with_no_gallery_match():
     assert len(genuine) == 1
 
 
+# checks rank-1 matches on the best of several templates sharing one identity, not just the first
 def test_rank1_accuracy_picks_best_of_several_templates_per_identity():
     base = unit_vectors(1, seed=8)[0]
     # identity "a" has 3 templates, only one of which is close to the probe
@@ -78,6 +83,7 @@ def test_rank1_accuracy_picks_best_of_several_templates_per_identity():
     assert accuracy == 1.0
 
 
+# checks the genuine score for a multi-template identity uses its best-matching template, not any one
 def test_verification_scores_genuine_is_max_across_repeated_identity_columns():
     base = unit_vectors(1, seed=12)[0]
     far = unit_vectors(1, seed=13)[0]
@@ -91,6 +97,7 @@ def test_verification_scores_genuine_is_max_across_repeated_identity_columns():
     assert genuine[0] > 0.99
 
 
+# checks fully separated genuine/impostor score distributions give AUC=1.0 and perfect TAR
 def test_roc_auc_perfect_separation_is_one():
     genuine = np.full(20, 0.9)
     impostor = np.full(20, 0.1)
@@ -99,6 +106,7 @@ def test_roc_auc_perfect_separation_is_one():
     assert tar_at_far[0.5] == 1.0
 
 
+# checks fully overlapping random score distributions give AUC close to the chance level, 0.5
 def test_roc_auc_no_separation_is_around_half():
     rng = np.random.default_rng(7)
     genuine = rng.normal(size=500)
