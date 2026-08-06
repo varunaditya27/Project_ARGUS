@@ -7,6 +7,15 @@ inpaint) to every face in one dlib detection pass.
 Output lands next to the input dir, as LFW_subset_masked/, mirroring the
 identity subfolder structure. That's MaskTheFace's own convention
 (args.write_path = args.path + "_masked"), not something we chose.
+
+--color "" matters: mask_the_face.py's --color argparse default is a
+non-empty hex string ("#0473e2"), and mask_face() in aux_functions.py
+checks `if args.color:` rather than whether the user actually asked for
+a color override - so left at its default, every mask template gets
+tinted the same blue regardless of its native color, and "surgical" /
+"surgical_blue" / "surgical_green" all render identically. Passing an
+empty string makes that check falsy and restores each template's real
+color.
 """
 
 import subprocess
@@ -28,6 +37,7 @@ def run():
         PYTHON, "mask_the_face.py",
         "--path", SUBSET_DIR,
         "--mask_type", "all",
+        "--color", "",
     ]
     subprocess.run(cmd, cwd=MASKTHEFACE_DIR, check=True)
 

@@ -43,7 +43,12 @@ def get_app():
     global _app
     if _app is None:
         _app = FaceAnalysis(name="buffalo_l", root=BASE_DIR, providers=["CPUExecutionProvider"])
-        _app.prepare(ctx_id=-1, det_size=(640, 640))
+        # 640x640 assumes scene-scale images with margin around the face.
+        # MFR2 (pre-aligned 160x160) and RWMFD's output (tightly cropped
+        # 128x128, no margin) get upsampled 4-5x into that and SCRFD's
+        # anchors stop matching - measured near-100% detection failure on
+        # both until dropping this to match the actual crop scale.
+        _app.prepare(ctx_id=-1, det_size=(160, 160))
     return _app
 
 
