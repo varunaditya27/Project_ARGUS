@@ -2,12 +2,10 @@
 
 import csv
 import os
-import sys
 
 import numpy as np
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from embeddings.generate import get_embedding  # noqa: E402
+from embeddings.generate import get_embedding
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 MANIFEST_PATH = os.path.join(BASE_DIR, "datasets", "processed", "enrollment_manifest.csv")

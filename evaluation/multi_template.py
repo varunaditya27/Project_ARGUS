@@ -2,7 +2,7 @@
 
 import numpy as np
 
-import eval_sets
+from evaluation import eval_sets
 
 
 # adds one embedding per (identity, mask_type) as an extra gallery template, alongside the unmasked photo

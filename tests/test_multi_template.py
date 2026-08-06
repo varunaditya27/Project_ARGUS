@@ -1,12 +1,8 @@
 """Tests for evaluation/multi_template.py - the ARGUS multi-template gallery builder."""
 
-import os
-import sys
-
 import numpy as np
 
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "evaluation"))
-import multi_template  # noqa: E402
+from evaluation import multi_template
 
 
 # fixed-size unit vectors, standing in for L2-normalized ArcFace embeddings

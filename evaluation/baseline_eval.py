@@ -2,8 +2,8 @@
 
 import json
 import os
-import eval_sets
-import metrics
+
+from evaluation import eval_sets, metrics
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 EMBEDDINGS_PATH = os.path.join(BASE_DIR, "embeddings", "embeddings.npz")

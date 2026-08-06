@@ -3,9 +3,8 @@
 import json
 import os
 
-import eval_sets
-import multi_template
-from baseline_eval import evaluate_split, evaluate_by_mask_type
+from evaluation import eval_sets, multi_template
+from evaluation.baseline_eval import evaluate_split, evaluate_by_mask_type
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 EMBEDDINGS_PATH = os.path.join(BASE_DIR, "embeddings", "embeddings.npz")

@@ -5,10 +5,10 @@ one unmasked enrollment photo per identity as gallery, everything else as
 probes. No fine-tuning - this is the zero-training number the rest of
 the project is trying to beat.
 
-Run `python evaluation/baseline_eval.py` after `embeddings/build_embeddings.py`
-has produced `embeddings/embeddings.npz`. It prints a report and writes
-the full breakdown to `results.json` (gitignored - regenerate it, don't
-hand-edit it).
+Run `python -m evaluation.baseline_eval` (from the repo root) after
+`embeddings/build_embeddings.py` has produced `embeddings/embeddings.npz`.
+It prints a report and writes the full breakdown to `results.json`
+(gitignored - regenerate it, don't hand-edit it).
 
 ## Headline numbers
 
@@ -86,7 +86,8 @@ Two real bugs were found and corrected mid-pipeline, not design choices:
 unmasked embedding per identity as gallery, also store one embedding per
 (identity, mask type) as extra templates, and match probes against
 whichever template scores highest. Zero training - reuses embeddings
-already computed. Run `python evaluation/multi_template_eval.py`.
+already computed. Run `python -m evaluation.multi_template_eval` (from
+the repo root).
 
 To keep this honest, whichever specific image becomes a mask-type
 template is removed from the probe set for that identity - otherwise a

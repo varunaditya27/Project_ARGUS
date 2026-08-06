@@ -4,7 +4,11 @@ import os
 import cv2
 import numpy as np
 import onnxruntime
+from insightface.app import FaceAnalysis
 
+# importing FaceAnalysis only defines the class - it doesn't create an onnx
+# session until get_app() below calls FaceAnalysis(...).prepare(), so patching
+# InferenceSession.__init__ here, after the import, still runs in time
 _original_session_init = onnxruntime.InferenceSession.__init__
 
 
@@ -18,8 +22,6 @@ def _capped_thread_session_init(self, path_or_bytes, sess_options=None, **kwargs
 
 
 onnxruntime.InferenceSession.__init__ = _capped_thread_session_init
-
-from insightface.app import FaceAnalysis  # noqa: E402
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 

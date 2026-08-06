@@ -9,14 +9,6 @@ RWMFD_DIR = os.path.join(BASE_DIR, "datasets", "masking", "rwmfd")
 MANIFEST_PATH = os.path.join(BASE_DIR, "datasets", "processed", "LFW_reduced_manifest.csv")
 OUT_DIR = os.path.join(BASE_DIR, "datasets", "processed", "LFW_subset_rwmfd")
 
-sys.path.insert(0, RWMFD_DIR)
-from wearmask import FaceMasker, BLUE_IMAGE_PATH, BLACK_IMAGE_PATH  # noqa: E402
-
-VARIANTS = {
-    "rwmfd_blue": BLUE_IMAGE_PATH,
-    "rwmfd_black": BLACK_IMAGE_PATH,
-}
-
 
 # loads the reduced-scope manifest rows to run RWMFD over
 def read_manifest(path):
@@ -24,10 +16,15 @@ def read_manifest(path):
         return list(csv.DictReader(f))
 
 
-# applies both mask variants to every image, skipping ones already done
+# applies both mask variants to every image, skipping ones already done. wearmask is imported here,
+# not at module level, since it only exists once RWMFD_DIR is added to sys.path
 def run():
+    sys.path.insert(0, RWMFD_DIR)
+    from wearmask import FaceMasker, BLUE_IMAGE_PATH, BLACK_IMAGE_PATH
+
+    variants = {"rwmfd_blue": BLUE_IMAGE_PATH, "rwmfd_black": BLACK_IMAGE_PATH}
     rows = read_manifest(MANIFEST_PATH)
-    total = len(rows) * len(VARIANTS)
+    total = len(rows) * len(variants)
     done = 0
     for row in rows:
         identity = row["identity"]
@@ -35,7 +32,7 @@ def run():
         out_identity_dir = os.path.join(OUT_DIR, identity)
         os.makedirs(out_identity_dir, exist_ok=True)
 
-        for variant_name, mask_path in VARIANTS.items():
+        for variant_name, mask_path in variants.items():
             out_path = os.path.join(out_identity_dir, f"{stem}_{variant_name}.jpg")
             done += 1
             if os.path.exists(out_path):
