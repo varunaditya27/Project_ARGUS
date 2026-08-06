@@ -12,6 +12,7 @@ face-recognition
 face-recognition-models
 Pillow
 pytest
+chromadb
 
 # backend (later phase, not wired up yet)
 fastapi
