@@ -1,70 +1,87 @@
 # enrollment/
 
-Builds the production enrollment gallery: one unmasked embedding per
-identity across LFW (5,749) + MFR2 (53) = 5,802 identities. This is
-separate from `datasets/` and `evaluation/`, which exist to *measure*
-masked recognition accuracy on a reduced 400-identity slice. This is
-about *seeding the real gallery* the backend's 1:N search will run
-against - full scope, no reduction.
+Seeds the demo gallery: 5,802 identities (LFW 5,749 + MFR2 53) enrolled
+unmasked, plus masked template variants for the 400-identity subset
+that already has them from `evaluation/`. This is the "database of
+people" the presentation demo recognizes a masked person against - the
+whole point is showing the system picks the *correct* one of 5,802, not
+a random lookalike.
 
-Embedding 5,802 images takes ~53 min on this machine's CPU (0.55s/image
-per `embeddings/generate.py`'s benchmark). That's not unreasonable on
-its own, but running it alongside everything else competing for CPU
-made a GPU path worth setting up - Colab's free T4 does the same job in
-a few minutes.
+## Why this writes to ChromaDB directly instead of going through the backend's HTTP API
 
-## Workflow
+The backend's real schema (`backend/app/recognition/adapters/chroma.py`)
+is respected exactly - collection `argus_templates`, ids
+`{student_id UUID}:{mask_type}`, metadata `student_id`/`mask_type`/
+`model_version` - so `/recognize` reads this gallery correctly with no
+changes on the backend side. What's different is *how* it gets there:
+`POST /students/{id}/enroll` is the right call for one real student
+enrolling one photo, but is one HTTP round trip per person, requires a
+running Postgres + a real classroom + real student rows for 5,802
+people who aren't actual students - it's the wrong tool for seeding a
+demo dataset at this scale. `seed_chroma.py` writes the same schema
+directly and finishes in under a minute.
 
-1. **Locally:** build the manifest and package images.
-
-   ```
-   python enrollment/build_manifest.py     # -> datasets/processed/enrollment_manifest.csv
-   python enrollment/package_for_colab.py  # -> enrollment/enrollment_images.zip (~54MB)
-   ```
-
-2. **Upload** `enrollment_images.zip` and `enrollment_manifest.csv` to a
-   Google Drive folder (e.g. `MyDrive/argus_enrollment/`). Drive, not a
-   direct browser upload widget, because a ~54MB file over a flaky
-   upload widget is a bad time and Drive lets you re-run the notebook
-   without re-uploading.
-
-3. **Run `generate_embeddings_colab.ipynb`** on Colab with a T4 runtime.
-   It mounts Drive, unzips, runs ArcFace (buffalo_l) with
-   `CUDAExecutionProvider`, and writes `enrollment_embeddings.npz` back
-   to the same Drive folder. Uses `det_size=(160, 160)`, not
-   InsightFace's default 640 - LFW/MFR2 images are small enough that 640
-   upsamples them past the point SCRFD's anchors still match, the same
-   detector bug we hit and fixed locally (see `evaluation/README.md`).
-
-4. **Download** `enrollment_embeddings.npz` from Drive back to
-   `enrollment/` on this machine.
-
-5. **Seed ChromaDB locally:**
-
-   ```
-   python enrollment/seed_chromadb.py
-   ```
-
-   Writes every row into a persistent Chroma collection at
-   `enrollment/chroma_data/` (collection name: `enrollments`, metadata:
-   `dataset`, `identity`, `filename`). Batches at 500 rows - Chroma
-   rejects larger single `add()` calls.
-
-## Why this is a separate pipeline, not a rerun of datasets/masking/
-
-`datasets/masking/scripts/` and `embeddings/build_embeddings.py` exist
-to build a *masked-vs-unmasked evaluation set* - they need synthetic
-mask variants, a reduced identity count to keep masking/RWMFD time
-bounded, and a gallery/probe split that never lets a probe leak into the
-gallery. None of that applies here: enrollment is just "one unmasked
-photo per real person," at full dataset scope, with no masking step and
-no evaluation split. Reusing the eval pipeline's reduced-scope manifest
-would have meant seeding a gallery of 400 people instead of 5,802 -
-wrong for what "initial DB" means here.
+This intentionally has **no corresponding Postgres `students` rows**.
+`/recognize` without a `session_id` never touches Postgres - it's pure
+Chroma search + `decide()` - so recognition against this gallery works
+correctly through the real API. Only attendance-recording (which needs
+`session_id` and a real student row) wouldn't apply here, which is
+correct: these are recognition-demo identities, not real students.
 
 ## Files
 
-- `build_manifest.py` - one unmasked photo per identity -> `enrollment_manifest.csv` (tracked in git, same policy as the other manifests)
-- `package_for_colab.py` - zips exactly those images for upload
-- `generate_embeddings_colab.ipynb` - GPU embedding generation, run on Colab
-- `seed_chromadb.py` - loads the Colab output into a local persistent Chroma collection
+- `build_manifest.py` - one unmasked photo per identity ->
+  `datasets/processed/enrollment_manifest.csv`. LFW: 5,749 identities
+  (verified against the raw dataset, not the >=2-image eval subset).
+  MFR2: 53, using each identity's earliest `no-mask`-labeled photo.
+- `build_embeddings_local.py` - runs `embeddings/generate.py` (same
+  thread-capped, `det_size=160` pipeline as evaluation) over that
+  manifest -> `enrollment_embeddings.npz`. ~53 min on this machine's
+  CPU. A Colab GPU path was attempted and abandoned after stacking
+  environment failures (onnxruntime-gpu/plain-onnxruntime file
+  clobbering, a NumPy 1.x/2.x ABI mismatch, a cuDNN version mismatch)
+  cost more time than the run it was meant to save.
+- `seed_chroma.py` - the actual seeding script. Combines
+  `enrollment_embeddings.npz` (5,802 UNMASKED templates) with the
+  masked variants already computed for the 400-identity eval subset in
+  `embeddings/embeddings.npz`, generates a stable UUID per identity
+  (`uuid5`, reproducible across reruns - reseeding never duplicates),
+  and upserts everything into `backend/.chroma` in 500-row batches
+  (Chroma's own limit). Deduplicates to one embedding per
+  (identity, mask_type) first - some identities have several source
+  photos masked with the same mask type, which collide on the same id
+  otherwise (hit this as a real crash, not a hypothetical).
+- `enrollment_identity_map.csv` - `student_id` (uuid) -> real
+  dataset/identity name, since there's no Postgres row to resolve this
+  from. The presenter's cheat sheet for the demo.
+
+## Verified end to end, not just seeded
+
+8,700 templates total (5,802 unmasked + 2,898 deduplicated masked
+variants). Queried Chroma directly with masked probes that were
+excluded from the gallery during dedup (a genuine held-out test, not
+matching an embedding against itself): **2,688/2,797 (96.1%)** correctly
+resolved to their true identity against the full 5,802-identity
+gallery - a harder test than `evaluation/`'s numbers since every other
+enrolled identity is a potential wrong answer, not just the 400-subset.
+Run the check yourself:
+
+```python
+import chromadb, numpy as np
+client = chromadb.PersistentClient(path="backend/.chroma")
+collection = client.get_collection("argus_templates")
+print(collection.count())  # 8700
+```
+
+## A cross-team note worth knowing
+
+Backend's `ARGUS_DETECTION_INPUT_SIZE` defaults to 640, matching
+InsightFace's own default - correct for normal enrollment photos and
+webcam frames. But this is the exact setting that broke detection
+almost entirely on tightly-cropped 128-160px images during this
+pipeline's own masking work (RWMFD output, MFR2's raw photos - both
+pre-cropped with no margin): SCRFD's anchors stop matching once a small
+image gets upsampled 4-5x into a 640x640 canvas. If MFR2's raw photos
+are ever fed through the backend's `/enroll` endpoint directly (rather
+than through this pipeline, which already uses `det_size=160`), expect
+the same failure.
