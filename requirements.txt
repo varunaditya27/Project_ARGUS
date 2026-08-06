@@ -1,4 +1,5 @@
 # masking + embeddings + evaluation (this phase)
+# backend has its own separately pinned requirements.txt / requirements-dev.txt
 insightface
 numpy
 onnxruntime
@@ -13,10 +14,3 @@ face-recognition-models
 Pillow
 pytest
 chromadb
-
-# backend (later phase, not wired up yet)
-fastapi
-uvicorn
-pydantic
-sqlalchemy
-torch

@@ -22,8 +22,6 @@ __pycache__/
 Thumbs.db
 .idea/
 venv/
-__pycache__/
-.pytest_cache/
 
 datasets/raw/
 datasets/processed/LFW_subset/
@@ -39,10 +37,6 @@ embeddings/chroma/
 evaluation/results.json
 evaluation/multi_template_results.json
 
-models/buffalo_l/*.onnx
-models/*.zip
-
-enrollment/enrollment_images.zip
 enrollment/enrollment_embeddings.npz
 enrollment/chroma_data/
 # enrollment_manifest.csv is kept, same policy as the other manifests above
