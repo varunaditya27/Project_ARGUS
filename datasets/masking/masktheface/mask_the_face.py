@@ -72,16 +72,61 @@ parser.add_argument(
     action="store_true",
     help="If true, original image is also stored in the masked folder",
 )
+parser.add_argument(
+    "--detector",
+    type=str,
+    default="dlib",
+    choices=["dlib", "scrfd"],
+    help="Face detector used before landmark prediction. dlib's own HOG detector is the "
+    "tool's original default but fails almost entirely below ~160px (found on the RFBL "
+    "dataset: 355/460 images undetected). scrfd (via insightface, det_size=160 - same "
+    "detector and setting this project's own embeddings pipeline already relies on for "
+    "small pre-cropped images) recovers all of them; landmark prediction still uses dlib's "
+    "68-point model unchanged, only the detector supplying its input box changes.",
+)
 parser.set_defaults(feature=False)
 
 args = parser.parse_args()
 args.write_path = args.path + "_masked"
 
-# Set up dlib face detector and predictor
-args.detector = dlib.get_frontal_face_detector()
+# Set up face detector and dlib landmark predictor
 path_to_dlib_model = "dlib_models/shape_predictor_68_face_landmarks.dat"
 if not os.path.exists(path_to_dlib_model):
     download_dlib_model()
+
+if args.detector == "scrfd":
+    import onnxruntime
+    from insightface.app import FaceAnalysis
+
+    # same fix as embeddings/generate.py: FaceAnalysis loads 5 separate onnx sessions, each
+    # defaulting to a thread pool sized to every core - uncapped, 5 of those fighting over
+    # the same cores is what made this step far slower than dlib's detector, not scrfd itself
+    _original_session_init = onnxruntime.InferenceSession.__init__
+
+    def _capped_thread_session_init(self, path_or_bytes, sess_options=None, **kwargs):
+        if sess_options is None:
+            sess_options = onnxruntime.SessionOptions()
+            sess_options.intra_op_num_threads = 1
+            sess_options.inter_op_num_threads = 1
+        _original_session_init(self, path_or_bytes, sess_options=sess_options, **kwargs)
+
+    onnxruntime.InferenceSession.__init__ = _capped_thread_session_init
+
+    class ScrfdDlibDetector:
+        def __init__(self):
+            model_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(
+                os.path.abspath(__file__)))))
+            self.app = FaceAnalysis(name="buffalo_l", root=model_root, providers=["CPUExecutionProvider"])
+            self.app.prepare(ctx_id=-1, det_size=(160, 160))
+
+        def __call__(self, image, upsample_num_times=0):
+            faces = self.app.get(image)
+            return [dlib.rectangle(int(f.bbox[0]), int(f.bbox[1]), int(f.bbox[2]), int(f.bbox[3]))
+                    for f in faces]
+
+    args.detector = ScrfdDlibDetector()
+else:
+    args.detector = dlib.get_frontal_face_detector()
 
 args.predictor = dlib.shape_predictor(path_to_dlib_model)
 

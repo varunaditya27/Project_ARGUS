@@ -27,6 +27,11 @@ datasets/raw/
 datasets/processed/LFW_subset/
 datasets/processed/LFW_subset_masked/
 datasets/processed/LFW_subset_rwmfd/
+datasets/processed/RFBL_flat/
+datasets/processed/RFBL_flat_masked/
+datasets/processed/RFBL_flat/
+datasets/processed/RFBL_flat_masked/
+datasets/RFBL/
 # manifests are small, deterministic, and worth tracking - they're the
 # actual provenance record for which images/identities were used.
 
@@ -40,3 +45,8 @@ evaluation/multi_template_results.json
 enrollment/enrollment_embeddings.npz
 enrollment/chroma_data/
 # enrollment_manifest.csv is kept, same policy as the other manifests above
+
+enrollment/rfbl_colab_bundle.zip
+enrollment/rfbl_embeddings.npz
+enrollment/rfbl_identity_map.csv
+# rfbl_manifest.csv is kept, same policy as the other manifests above
