@@ -25,13 +25,20 @@ async def test_runtime_exposes_capture_configuration(client: AsyncClient) -> Non
 
 async def test_models_lists_placeholders_and_uncalibrated_thresholds(client: AsyncClient) -> None:
     body = (await client.get("/api/v1/models")).json()
-    assert {component["name"] for component in body["components"]} == {
+    components = {component["name"]: component for component in body["components"]}
+    assert components.keys() == {
         "face_detector",
         "face_embedder",
         "mask_synthesizer",
         "template_index",
     }
-    assert all(component["configured"] is False for component in body["components"])
+    # Mask synthesis is pure geometry, so it is always available; the three
+    # components that need a model file or a server are not.
+    assert components["mask_synthesizer"]["configured"] is True
+    assert not any(
+        components[name]["configured"]
+        for name in ("face_detector", "face_embedder", "template_index")
+    )
     assert body["thresholds"] == {
         "match_threshold": None,
         "review_threshold": None,

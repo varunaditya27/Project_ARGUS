@@ -20,7 +20,7 @@ import uuid
 from collections.abc import Sequence
 from dataclasses import dataclass
 
-from sqlalchemy import Row, func, select, text
+from sqlalchemy import Row, delete, func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import Attendance, ClassSession, Student
@@ -118,6 +118,17 @@ class AttendanceRepository:
                 "confidence": ABSENT_CONFIDENCE,
                 "absent": AttendanceStatus.ABSENT.value,
             },
+        )
+        return int(result.rowcount or 0)
+
+    async def delete_for_student(self, student_id: uuid.UUID) -> int:
+        """Drop a student's attendance history.
+
+        ``docs/db.md`` declares the foreign keys without ``ON DELETE``, so these
+        rows have to go before the student row can be removed.
+        """
+        result = await self._session.execute(
+            delete(Attendance).where(Attendance.student_id == student_id)
         )
         return int(result.rowcount or 0)
 

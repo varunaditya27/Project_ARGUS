@@ -1,9 +1,9 @@
 """Initial schema: classrooms, students, class_sessions, attendance.
 
-This is a literal materialisation of docs/db.md. Nothing beyond those four
-tables is created; the only additions are indexes, CHECK constraints over the
-already-documented status vocabularies, and FK delete rules -- see
-docs/database_setup.md -> "Schema mapping decisions".
+A literal materialisation of docs/db.md -- the four documented tables and the
+two documented constraints, with no additional index, CHECK constraint or
+foreign-key delete rule. See app/db/models.py for the two invariants that the
+service layer upholds as a result.
 
 Revision ID: 0001
 Revises:
@@ -37,10 +37,6 @@ def upgrade() -> None:
         sa.Column("semester", sa.Integer(), nullable=False),
         sa.Column("strength", sa.Integer(), nullable=False),
         sa.PrimaryKeyConstraint("class_id", name="pk_classrooms"),
-        # CHECK names are bare: the metadata naming convention expands them to
-        # ck_<table>_<name>, matching app/db/models.py.
-        sa.CheckConstraint("semester > 0", name="semester_positive"),
-        sa.CheckConstraint("strength >= 0", name="strength_non_negative"),
     )
 
     op.create_table(
@@ -57,11 +53,8 @@ def upgrade() -> None:
             ["class_id"],
             ["classrooms.class_id"],
             name="fk_students_class_id",
-            ondelete="SET NULL",
         ),
     )
-    # Roster scan + keyset pagination by roll number inside a classroom.
-    op.create_index("ix_students_class_id_roll_no", "students", ["class_id", "roll_no"])
 
     op.create_table(
         "class_sessions",
@@ -78,20 +71,7 @@ def upgrade() -> None:
             ["class_id"],
             ["classrooms.class_id"],
             name="fk_class_sessions_class_id",
-            ondelete="RESTRICT",
         ),
-        sa.CheckConstraint("status IN ('ACTIVE', 'CLOSED')", name="status_domain"),
-        sa.CheckConstraint("end_time > start_time", name="time_range"),
-    )
-    op.create_index("ix_class_sessions_class_id_date", "class_sessions", ["class_id", "date"])
-    # "Fetch Active Class Session" has a single answer only if one session per
-    # classroom can be ACTIVE at a time.
-    op.create_index(
-        "uq_class_sessions_active_per_class",
-        "class_sessions",
-        ["class_id"],
-        unique=True,
-        postgresql_where=sa.text("status = 'ACTIVE'"),
     )
 
     op.create_table(
@@ -108,26 +88,17 @@ def upgrade() -> None:
             ["session_id"],
             ["class_sessions.session_id"],
             name="fk_attendance_session_id",
-            ondelete="CASCADE",
         ),
         sa.ForeignKeyConstraint(
             ["student_id"],
             ["students.student_id"],
             name="fk_attendance_student_id",
-            ondelete="CASCADE",
         ),
-        sa.CheckConstraint("status IN ('Present', 'Absent')", name="status_domain"),
-        sa.CheckConstraint("confidence >= -1.0 AND confidence <= 1.0", name="confidence_range"),
     )
-    op.create_index("ix_attendance_student_id", "attendance", ["student_id"])
 
 
 def downgrade() -> None:
-    op.drop_index("ix_attendance_student_id", table_name="attendance")
     op.drop_table("attendance")
-    op.drop_index("uq_class_sessions_active_per_class", table_name="class_sessions")
-    op.drop_index("ix_class_sessions_class_id_date", table_name="class_sessions")
     op.drop_table("class_sessions")
-    op.drop_index("ix_students_class_id_roll_no", table_name="students")
     op.drop_table("students")
     op.drop_table("classrooms")

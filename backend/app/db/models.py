@@ -1,14 +1,19 @@
 """ORM mapping of the schema documented in ``docs/db.md``.
 
-Rules followed here:
+The mapping is deliberately literal: the four documented tables, their columns,
+types and the two documented constraints, and nothing else. No extra index,
+CHECK constraint or foreign-key delete rule is declared, so the DDL Alembic
+emits is exactly what the schema document specifies.
 
-* The four documented tables, their columns, types and constraints are mapped
-  1:1. No extra table or column is introduced.
-* Additions are limited to things that carry no new information -- indexes for
-  the access paths the attendance flow actually uses, CHECK constraints that
-  encode the already-documented status vocabularies, and FK delete rules -- all
-  listed in ``docs/database_setup.md``.
-* Face embeddings are **not** stored here; they live in ChromaDB.
+Two consequences are handled in the service layer rather than the schema:
+
+* Foreign keys default to ``NO ACTION``, so rows that reference a student or a
+  session must be removed before it is deleted -- see ``StudentService.delete``.
+* Nothing stops two ACTIVE sessions existing for one classroom, which the
+  recognition workflow ("Fetch Active Class Session") assumes cannot happen.
+  ``SessionService.create`` serialises that check with an advisory lock.
+
+Face embeddings are **not** stored here; they live in ChromaDB.
 """
 
 from __future__ import annotations
@@ -17,11 +22,9 @@ import datetime as dt
 import uuid
 
 from sqlalchemy import (
-    CheckConstraint,
     Date,
     Float,
     ForeignKey,
-    Index,
     Integer,
     Text,
     Time,
@@ -32,7 +35,6 @@ from sqlalchemy.dialects.postgresql import TIMESTAMP, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
-from app.domain.enums import AttendanceStatus, SessionStatus
 
 _UUID_PK = text("gen_random_uuid()")
 
@@ -52,11 +54,6 @@ class Classroom(Base):
 
     students: Mapped[list[Student]] = relationship(back_populates="classroom", lazy="raise")
 
-    __table_args__ = (
-        CheckConstraint("semester > 0", name="semester_positive"),
-        CheckConstraint("strength >= 0", name="strength_non_negative"),
-    )
-
 
 class Student(Base):
     __tablename__ = "students"
@@ -69,7 +66,7 @@ class Student(Base):
     roll_no: Mapped[int] = mapped_column(Integer, nullable=False, unique=True)
     class_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
-        ForeignKey("classrooms.class_id", ondelete="SET NULL"),
+        ForeignKey("classrooms.class_id"),
         nullable=True,
     )
     #: Cloudflare R2 URL of the original (unmasked) enrollment image.
@@ -80,11 +77,6 @@ class Student(Base):
 
     classroom: Mapped[Classroom | None] = relationship(back_populates="students", lazy="raise")
 
-    __table_args__ = (
-        # Roster scan + keyset pagination inside a classroom, ordered by roll_no.
-        Index("ix_students_class_id_roll_no", "class_id", "roll_no"),
-    )
-
 
 class ClassSession(Base):
     __tablename__ = "class_sessions"
@@ -94,7 +86,7 @@ class ClassSession(Base):
     )
     class_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
-        ForeignKey("classrooms.class_id", ondelete="RESTRICT"),
+        ForeignKey("classrooms.class_id"),
         nullable=False,
     )
     subject: Mapped[str] = mapped_column(Text, nullable=False)
@@ -103,24 +95,6 @@ class ClassSession(Base):
     start_time: Mapped[dt.time] = mapped_column(Time, nullable=False)
     end_time: Mapped[dt.time] = mapped_column(Time, nullable=False)
     status: Mapped[str] = mapped_column(Text, nullable=False)
-
-    __table_args__ = (
-        CheckConstraint(
-            f"status IN ('{SessionStatus.ACTIVE}', '{SessionStatus.CLOSED}')",
-            name="status_domain",
-        ),
-        CheckConstraint("end_time > start_time", name="time_range"),
-        Index("ix_class_sessions_class_id_date", "class_id", "date"),
-        # "Fetch Active Class Session" (docs/db.md recognition workflow) only has a
-        # single answer if at most one session per classroom is ACTIVE. Enforced in
-        # the database so concurrent writers cannot both win.
-        Index(
-            "uq_class_sessions_active_per_class",
-            "class_id",
-            unique=True,
-            postgresql_where=text(f"status = '{SessionStatus.ACTIVE}'"),
-        ),
-    )
 
 
 class Attendance(Base):
@@ -131,12 +105,12 @@ class Attendance(Base):
     )
     session_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
-        ForeignKey("class_sessions.session_id", ondelete="CASCADE"),
+        ForeignKey("class_sessions.session_id"),
         nullable=False,
     )
     student_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
-        ForeignKey("students.student_id", ondelete="CASCADE"),
+        ForeignKey("students.student_id"),
         nullable=False,
     )
     #: First detection that marked the student present, or the session close
@@ -154,13 +128,4 @@ class Attendance(Base):
 
     __table_args__ = (
         UniqueConstraint("session_id", "student_id", name="uq_attendance_session_id_student_id"),
-        CheckConstraint(
-            f"status IN ('{AttendanceStatus.PRESENT}', '{AttendanceStatus.ABSENT}')",
-            name="status_domain",
-        ),
-        # Cosine similarity domain, matching the Pydantic contract in docs/design.md.
-        CheckConstraint("confidence >= -1.0 AND confidence <= 1.0", name="confidence_range"),
-        # Per-student attendance history. (session_id lookups are already served
-        # by the uq_attendance_session_id_student_id index prefix.)
-        Index("ix_attendance_student_id", "student_id"),
     )

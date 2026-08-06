@@ -9,6 +9,7 @@ from app.db.database import Database
 from app.db.integrity import integrity_guard
 from app.db.models import Student
 from app.recognition.ports import TemplateIndex
+from app.repositories.attendance import AttendanceRepository
 from app.repositories.student import StudentRepository
 from app.schemas.student import StudentCreate
 
@@ -55,6 +56,10 @@ class StudentService:
         Vectors go first: if Chroma fails the student stays enrolled and the call
         fails loudly, whereas the reverse order could leave searchable vectors
         pointing at a deleted identity (acceptance test AT-11).
+
+        The attendance rows go in the same transaction as the student row. The
+        schema in ``docs/db.md`` declares no ``ON DELETE`` behaviour, so without
+        this the delete would fail for anyone who has ever been marked present.
         """
         await self.get(student_id)
 
@@ -63,8 +68,14 @@ class StudentService:
             removed_templates = await self._index.delete_student(student_id)
 
         async with self._db.session() as session:
+            removed_attendance = await AttendanceRepository(session).delete_for_student(student_id)
             deleted = await StudentRepository(session).delete(student_id)
         if not deleted:
             raise NotFoundError(f"Student {student_id} does not exist.")
-        logger.info("Deleted student %s and %d templates", student_id, removed_templates)
+        logger.info(
+            "Deleted student %s with %d templates and %d attendance rows",
+            student_id,
+            removed_templates,
+            removed_attendance,
+        )
         return removed_templates

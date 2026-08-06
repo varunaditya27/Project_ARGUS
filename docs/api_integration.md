@@ -46,19 +46,22 @@ Show `error.message` to the operator: it always names the concrete next step.
 
 ## 2. Current capability
 
-The attendance system - classrooms, roster, sessions, interval capture, absence
-on close, reporting - is complete and works against PostgreSQL today.
+The attendance system - classrooms, roster, bulk import, sessions, interval
+capture, absence on close, reporting - is complete and works against PostgreSQL
+today.
 
-The vision components (SCRFD detection, ArcFace embedding, MaskTheFace variants)
-are **placeholders**, and the decision thresholds in `docs/design.md` are still
-`null`. Consequences you must handle in the UI:
+The vision stack is implemented: SCRFD detection and ArcFace embedding run on
+onnxruntime against the InsightFace buffalo_l ONNX pack, and mask variants are
+synthesised geometrically. Whether they are *live* depends on deployment - the
+model files must be present and `ARGUS_MODEL_ROOT` set, and Chroma must be
+configured. Until then those endpoints answer `503 dependency_not_configured`.
 
-- `POST /students/{id}/enroll`, `POST /recognize`, `WS /live` and
-  `GET /students/{id}/templates` return `503 dependency_not_configured`.
-- Even once the models land, attendance is only written for a `MATCH`, and a
-  `MATCH` is impossible while the thresholds are uncalibrated - the API returns
-  `HUMAN_REVIEW` instead. This is deliberate: no attendance is better than
-  attendance based on a guessed threshold.
+**The one thing you must handle in the UI regardless:** the decision thresholds
+in `docs/design.md` are still `null`, and attendance is only written for a
+`MATCH`. A `MATCH` is impossible while the thresholds are uncalibrated, so
+recognition returns `HUMAN_REVIEW` and nothing is recorded automatically. This is
+deliberate - no attendance is better than attendance based on a guessed
+threshold. See `docs/benchmarks.md` section 4 for how the numbers get set.
 
 Poll `GET /models` to find out what is live; it is the single source of truth
 and needs no redeploy of the frontend:
@@ -66,7 +69,10 @@ and needs no redeploy of the frontend:
 ```json
 {
   "components": [
-    {"name": "face_detector", "configured": false, "adapter": "placeholder", "detail": "not implemented; requires SCRFD adapter + ARGUS_DETECTOR_MODEL_PATH"}
+    {"name": "face_detector", "configured": true, "adapter": "scrfd-onnx", "detail": "det_10g.onnx providers=['CPUExecutionProvider'] loaded=true score>=0.5 nms_iou=0.4"},
+    {"name": "face_embedder", "configured": true, "adapter": "arcface-onnx", "detail": "w600k_r50.onnx providers=['CPUExecutionProvider'] loaded=true dim=512"},
+    {"name": "mask_synthesizer", "configured": true, "adapter": "geometric-aligned-frame", "detail": "variants=['surgical_blue', ...]"},
+    {"name": "template_index", "configured": false, "adapter": "placeholder", "detail": "set ARGUS_CHROMA_MODE"}
   ],
   "thresholds": {"match_threshold": null, "review_threshold": null, "minimum_margin": null, "calibrated": false},
   "embedding_dim": 512,
@@ -74,6 +80,9 @@ and needs no redeploy of the frontend:
   "recognition_ready": false
 }
 ```
+
+`recognition_ready` is the single boolean to gate the UI on: it is true only when
+every component is configured *and* the thresholds are calibrated.
 
 ---
 
@@ -104,16 +113,25 @@ the two differ, the roster import is incomplete - worth surfacing in the UI.
 | Method | Path | Notes |
 |---|---|---|
 | `POST` | `/students` | `{student_name, roll_no, class_id, image_url}` |
+| `POST` | `/students/import` | Bulk roster from a CSV plus an optional ZIP of photographs - see `docs/registration_import.md` |
 | `GET` | `/students` | Filter `class_id`; keyset paging via `after` + `limit` |
 | `GET` | `/students/{student_id}` | |
-| `DELETE` | `/students/{student_id}` | Removes the Chroma templates first, then the row |
-| `POST` | `/students/{student_id}/enroll` | multipart `image`; **503 today** |
-| `GET` | `/students/{student_id}/templates` | mask_types stored in Chroma; **503 today** |
+| `DELETE` | `/students/{student_id}` | Removes the Chroma templates, then the attendance rows and the student, in one transaction |
+| `POST` | `/students/{student_id}/enroll` | multipart `image`; needs the models and Chroma |
+| `GET` | `/students/{student_id}/templates` | mask_types stored in Chroma |
 | `GET` | `/students/{student_id}/attendance` | History across sessions |
 
-`roll_no` is an integer and globally unique. `image_url` must be an absolute
-HTTP(S) URL - upload the photograph to Cloudflare R2 first and send the URL; the
-backend does not handle the upload.
+`roll_no` is an integer and globally unique - that is what `docs/db.md`
+specifies, so alphanumeric roll numbers like `CS2024001` cannot be stored, and
+two classrooms cannot reuse a number.
+
+For a single student, `image_url` must be an absolute HTTP(S) URL you have
+already uploaded. For a bulk import the backend can upload the photographs to
+Cloudflare R2 itself; that is the difference between the two routes.
+
+Deleting a student is destructive of their attendance history, because the
+foreign keys carry no `ON DELETE` rule and the row cannot go otherwise. Warn
+before calling it.
 
 ```jsonc
 // POST /students
@@ -295,6 +313,46 @@ Both return the same per-face payload:
 `student_id` may be populated for `UNKNOWN`/`HUMAN_REVIEW` - it is the best
 *candidate*, not an identification. Only treat `state === "MATCH"` as identified.
 
+### 3.8 Offline recognition runs
+
+Two routes take a recording instead of a live camera. Both replay their results
+through the same capture buffer as the live stream, so absence is still derived
+only when the session is closed - a batch run never marks anybody absent.
+
+| Method | Path | Body |
+|---|---|---|
+| `POST` | `/recognize/video` | multipart: `video` (file), optional `session_id`, optional `recorded_at` |
+| `POST` | `/recognize/batch` | multipart: `archive` (ZIP of stills), optional `session_id`, optional `recorded_at` |
+
+`recorded_at` matters for the register. Supply it and each sampled video frame is
+timestamped at `recorded_at + frame_index / fps`, so `attendance.timestamp`
+reflects when the student actually appeared in the recording rather than when the
+file was uploaded. Omit it and the upload instant is used for everything.
+
+Video is sampled every Nth frame (`ARGUS_VIDEO_FRAME_STRIDE`, default 5) rather
+than exhaustively; which containers decode depends on the OpenCV build on the
+server. Both routes return the same shape:
+
+```jsonc
+{
+  "session_id": "00000000-0000-0000-0000-000000000000",
+  "items_processed": 240,      // frames sampled, or images read from the archive
+  "items_skipped": 3,          // undecodable entries, reported in `skipped`
+  "faces_detected": 812,
+  "matches": 0,                // 0 while the thresholds are uncalibrated
+  "students_recognised": [],   // distinct student_ids that reached MATCH
+  "attendance_recorded": 0,
+  "duration_ms": 18420,
+  "items": [ /* per-item detail, capped */ ],
+  "skipped": [{"name": "notes.png", "reason": "not a decodable image"}]
+}
+```
+
+Size limits are `ARGUS_VIDEO_MAX_BYTES`, `ARGUS_BATCH_MAX_ARCHIVE_BYTES` and
+`ARGUS_BATCH_MAX_FILES`; exceeding them gives `413 payload_too_large`. Archives
+are validated before anything is decompressed, so a malformed or hostile ZIP
+fails with `422` rather than being partially processed.
+
 ---
 
 ## 4. Suggested frontend flows
@@ -308,9 +366,16 @@ keyset paging. Present rows appear progressively while the lecture runs.
 **Closing.** Call `POST /sessions/{id}/close` once, display the report, then
 refresh the register: `unrecorded` becomes 0 and `absent` becomes non-zero.
 
-**Enrollment.** Upload the photograph to R2, `POST /students` with the URL, then
-`POST /students/{id}/enroll` with the image. Handle `503` from the enroll step
-until the models exist - the student row is still created and usable.
+**Enrollment, one student.** Upload the photograph to R2, `POST /students` with
+the URL, then `POST /students/{id}/enroll` with the image. Handle `503` from the
+enroll step when the models or Chroma are not configured - the student row is
+still created and usable.
+
+**Enrollment, a whole roster.** `POST /students/import` with the CSV and a ZIP of
+photographs; the backend uploads the images and writes the rows. It reports per
+row, so render `errors` as a table rather than a single failure message, and
+offer `dry_run=true` first so an admin can see what would happen. Full contract
+in `docs/registration_import.md`.
 
 **Degraded mode.** Call `GET /health` and `GET /models` at startup. If
 `recognition_ready` is false, hide the live-recognition surface and label the

@@ -8,6 +8,7 @@ Routers never construct dependencies themselves - they pull them from
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass
 
 from app.attendance.buffer import ObservationBuffer
@@ -20,8 +21,12 @@ from app.recognition.factory import RecognitionStack, build_recognition_stack
 from app.services.attendance import AttendanceService
 from app.services.classroom import ClassroomService
 from app.services.recognition import RecognitionService
+from app.services.registration_import import RegistrationImportService
 from app.services.session import SessionService
 from app.services.student import StudentService
+from app.storage.disabled import UnconfiguredObjectStorage
+from app.storage.ports import ObjectStorage
+from app.storage.r2 import R2ObjectStorage
 
 logger = get_logger(__name__)
 
@@ -38,6 +43,7 @@ class ServiceRegistry:
     sessions: SessionService
     attendance: AttendanceService
     recognition: RecognitionService
+    registration_import: RegistrationImportService
 
 
 @dataclass(slots=True)
@@ -45,6 +51,7 @@ class Container:
     settings: Settings
     stack: RecognitionStack
     buffer: ObservationBuffer
+    storage: ObjectStorage
     database: Database | None
     flusher: IntervalFlusher | None
     registry: ServiceRegistry | None
@@ -57,6 +64,9 @@ class Container:
         return self.registry
 
     async def startup(self) -> None:
+        # Load the ONNX graphs before the first request so /health and /models
+        # report the real state instead of "not loaded yet".
+        await asyncio.to_thread(self.stack.warmup)
         if self.flusher is not None:
             await self.flusher.start()
 
@@ -67,9 +77,29 @@ class Container:
             await self.database.dispose()
 
 
+def build_object_storage(settings: Settings) -> ObjectStorage:
+    """Cloudflare R2 when it is configured, otherwise the adapter that says so."""
+    if settings.object_storage_mode == "r2":
+        assert settings.r2_endpoint_url is not None
+        assert settings.r2_bucket is not None
+        assert settings.r2_access_key_id is not None
+        assert settings.r2_secret_access_key is not None
+        assert settings.r2_public_base_url is not None
+        return R2ObjectStorage(
+            endpoint_url=settings.r2_endpoint_url,
+            bucket=settings.r2_bucket,
+            access_key_id=settings.r2_access_key_id,
+            secret_access_key=settings.r2_secret_access_key,
+            public_base_url=settings.r2_public_base_url,
+            key_prefix=settings.r2_key_prefix,
+        )
+    return UnconfiguredObjectStorage()
+
+
 def build_container(settings: Settings) -> Container:
     stack = build_recognition_stack(settings)
     buffer = ObservationBuffer(max_sessions=settings.capture_max_buffered_sessions)
+    storage = build_object_storage(settings)
     database = build_database(settings)
 
     registry: ServiceRegistry | None = None
@@ -88,6 +118,14 @@ def build_container(settings: Settings) -> Container:
             recognition=RecognitionService(
                 stack=stack, settings=settings, students=students, attendance=attendance
             ),
+            registration_import=RegistrationImportService(
+                database,
+                storage,
+                max_csv_bytes=settings.import_max_csv_bytes,
+                max_archive_bytes=settings.import_max_archive_bytes,
+                max_rows=settings.import_max_rows,
+                max_image_bytes=settings.enrollment_max_image_bytes,
+            ),
         )
         flusher = IntervalFlusher(
             buffer=buffer,
@@ -96,15 +134,18 @@ def build_container(settings: Settings) -> Container:
         )
 
     logger.info(
-        "Container ready (database=%s, recognition_ready=%s, capture_interval=%.1fs)",
+        "Container ready (database=%s, recognition_ready=%s, object_storage=%s, "
+        "capture_interval=%.1fs)",
         database is not None,
         stack.ready,
+        storage.status().adapter,
         settings.capture_interval_seconds,
     )
     return Container(
         settings=settings,
         stack=stack,
         buffer=buffer,
+        storage=storage,
         database=database,
         flusher=flusher,
         registry=registry,

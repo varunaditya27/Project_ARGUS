@@ -119,5 +119,48 @@ templates per student at the default configuration. Re-run with
 - If the interval upsert degrades faster than linearly with
   `--interval-batch`, check that `ARGUS_CAPTURE_FLUSH_CHUNK_SIZE` still splits
   the work into statements PostgreSQL can plan quickly.
-- If the absence pass degrades, confirm `ix_students_class_id_roll_no` exists;
-  without it the anti-join falls back to a sequential scan.
+- The absence pass anti-join is a sequential scan of `students` by design: the
+  schema in `docs/db.md` declares no index on `class_id` and none was added. It
+  is one pass over narrow rows, which is why 20 000 students close in well under
+  a second. If a deployment outgrows that, add the index in a separate migration.
+
+> The reference run above was measured against an earlier build that carried
+> extra indexes. Those were removed to keep the DDL literal to `docs/db.md`
+> (see `docs/database_setup.md` section 4), so re-measure before quoting these
+> numbers. The paths that dominate - the interval upsert and the register page -
+> are served by the documented `UNIQUE` constraints and are unaffected.
+
+---
+
+## 4. Calibrating the thresholds
+
+`ARGUS_MATCH_THRESHOLD`, `ARGUS_REVIEW_THRESHOLD` and `ARGUS_MINIMUM_MARGIN` ship
+empty on purpose. Until all three are set the decision layer can only return
+`HUMAN_REVIEW` or `UNKNOWN`, so **no attendance is ever written automatically**.
+They are not guessable: the right values depend on the cohort, the camera and how
+students actually wear masks, and a number invented here would silently trade
+false accepts against false rejects on someone's attendance record.
+
+What you need is a labelled probe set - for each enrolled student, a handful of
+frames captured the way the deployment will capture them. Then:
+
+1. Enrol the cohort so the gallery holds the unmasked template plus one per mask
+   variant for every student.
+2. Score every probe against the gallery, keeping the best similarity and the
+   margin to the best *different* identity.
+3. Split the scores into genuine (probe matches its own template) and impostor
+   (everything else).
+4. Choose `ARGUS_MATCH_THRESHOLD` at the operating point where the impostor
+   distribution gives you an acceptable false-accept rate - for attendance,
+   erring towards review is much cheaper than marking the wrong student present.
+5. Set `ARGUS_REVIEW_THRESHOLD` below it, at the score under which a face is not
+   worth a human's time. The band between the two is what reaches an operator.
+6. Set `ARGUS_MINIMUM_MARGIN` from the genuine/impostor gap: it rejects the case
+   where two identities score almost identically, which is exactly the confusion
+   a 20 000 person gallery produces.
+
+For scale, a smoke test of the shipped models on a single portrait gives cosine
+similarity around **0.56-0.62** between an unmasked template and its synthetic
+masked variants, around **0.97** between two views of the same face, and around
+**0.06** against unrelated content. That is an order-of-magnitude sanity check on
+where the thresholds will land, not a substitute for calibration.

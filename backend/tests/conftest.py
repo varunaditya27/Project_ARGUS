@@ -20,10 +20,20 @@ requires_database = pytest.mark.skipif(
 
 
 def make_settings(**overrides: object) -> Settings:
-    """Settings isolated from the developer's .env and shell environment."""
+    """Settings isolated from the developer's .env and shell environment.
+
+    Every field a test depends on is pinned explicitly. ``_env_file=None`` only
+    ignores ``.env``; an exported ``ARGUS_MODEL_ROOT`` would otherwise still leak
+    in and quietly change which adapters the suite exercises.
+    """
     defaults: dict[str, object] = {
         "database_url": None,
         "chroma_mode": "disabled",
+        "object_storage_mode": "disabled",
+        "model_root": None,
+        "detector_model_path": None,
+        "embedder_model_path": None,
+        "landmark_model_path": None,
         "match_threshold": None,
         "review_threshold": None,
         "minimum_margin": None,

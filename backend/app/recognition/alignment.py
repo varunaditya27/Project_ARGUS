@@ -31,12 +31,13 @@ ARCFACE_REFERENCE_LANDMARKS: NDArray[np.float32] = np.array(
 )
 
 
-def _require_cv2() -> Any:
+def require_cv2() -> Any:
+    """Import OpenCV or fail with an actionable message."""
     try:
         import cv2
     except ImportError as exc:  # pragma: no cover - depends on the install extra
         raise DependencyNotConfiguredError(
-            "OpenCV is required for face alignment. Install the recognition extra: "
+            "OpenCV is required for image processing. Install the recognition extra: "
             "pip install -e '.[recognition]'."
         ) from exc
     return cv2
@@ -78,7 +79,7 @@ def align_face(
     output_size: int = OUTPUT_SIZE,
 ) -> NDArray[np.uint8]:
     """Warp a detected face into the canonical ArcFace crop."""
-    cv2 = _require_cv2()
+    cv2 = require_cv2()
     matrix = similarity_transform(landmarks)
     if output_size != OUTPUT_SIZE:
         matrix = matrix * (output_size / OUTPUT_SIZE)
@@ -90,7 +91,7 @@ def decode_image(payload: bytes) -> NDArray[np.uint8]:
 
     A file is never trusted because of its extension (docs/design.md, step 1).
     """
-    cv2 = _require_cv2()
+    cv2 = require_cv2()
     buffer = np.frombuffer(payload, dtype=np.uint8)
     image = cv2.imdecode(buffer, cv2.IMREAD_COLOR)
     if image is None:
@@ -100,6 +101,6 @@ def decode_image(payload: bytes) -> NDArray[np.uint8]:
 
 def blur_variance(aligned_face: NDArray[np.uint8]) -> float:
     """Variance of the Laplacian -- lower means blurrier."""
-    cv2 = _require_cv2()
+    cv2 = require_cv2()
     grey = cv2.cvtColor(aligned_face, cv2.COLOR_BGR2GRAY)
     return float(cv2.Laplacian(grey, cv2.CV_64F).var())

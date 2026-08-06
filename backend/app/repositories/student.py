@@ -1,12 +1,20 @@
 from __future__ import annotations
 
 import uuid
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 
-from sqlalchemy import delete, insert, select
+from sqlalchemy import delete, insert, select, text
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import Student
+
+#: ``= ANY(array)`` rather than ``IN (...)``: one bind parameter regardless of how
+#: many roll numbers are checked, so a 20 000 row import stays a single round trip
+#: and never approaches the protocol's parameter limit.
+_EXISTING_ROLL_NUMBERS = text(
+    "SELECT roll_no FROM students WHERE roll_no = ANY(CAST(:rolls AS integer[]))"
+)
 
 
 class StudentRepository:
@@ -73,3 +81,30 @@ class StudentRepository:
         # executemany form: it raises on failure, so a return means every row landed.
         await self._session.execute(insert(Student), payload)
         return len(payload)
+
+    async def existing_roll_numbers(self, rolls: Sequence[int]) -> set[int]:
+        """Roll numbers from ``rolls`` that are already enrolled, in one query."""
+        if not rolls:
+            return set()
+        result = await self._session.execute(_EXISTING_ROLL_NUMBERS, {"rolls": list(rolls)})
+        return {int(roll_no) for roll_no in result.scalars()}
+
+    async def insert_new(self, rows: Sequence[Mapping[str, object]]) -> set[int]:
+        """Insert roster rows and report which roll numbers actually landed.
+
+        One multi-row statement per call, and ``ON CONFLICT DO NOTHING`` on the
+        ``roll_no`` unique index instead of a pre-flight SELECT: a roll number
+        inserted by a concurrent request loses its row here and is reported back to
+        the caller by omission, rather than aborting the whole batch. Existing
+        students are never updated.
+        """
+        if not rows:
+            return set()
+        stmt = (
+            pg_insert(Student)
+            .values(list(rows))
+            .on_conflict_do_nothing(index_elements=[Student.roll_no])
+            .returning(Student.roll_no)
+        )
+        result = await self._session.execute(stmt)
+        return {int(roll_no) for roll_no in result.scalars()}

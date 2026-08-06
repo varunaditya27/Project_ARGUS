@@ -1,10 +1,8 @@
-"""Placeholder adapters for the vision components that are not implemented yet.
+"""Fallbacks used when a component has not been configured.
 
-They deliberately contain **no** model, no heuristic and no fabricated output:
-every call raises 503 with the exact next step. The rest of the backend
-(sessions, capture intervals, absence computation, reporting) is complete and
-switches over the moment a real adapter is registered in
-:mod:`app.recognition.factory`.
+They contain **no** model, no heuristic and no fabricated output: every call
+raises 503 naming the setting that is missing. A deployment therefore either runs
+the real SCRFD/ArcFace/Chroma stack or refuses to answer - it never guesses.
 """
 
 from __future__ import annotations
@@ -21,27 +19,25 @@ from app.recognition.ports import (
     TemplateMatch,
 )
 
-_IMPLEMENT_HERE = "app/recognition/adapters/"
-
 
 def _unavailable(component: str, requirement: str) -> DependencyNotConfiguredError:
     return DependencyNotConfiguredError(
-        f"The {component} is not implemented yet, so this endpoint cannot return a result.",
-        details={"component": component, "required": requirement, "implement_in": _IMPLEMENT_HERE},
+        f"The {component} is not configured, so this endpoint cannot return a result.",
+        details={"component": component, "required": requirement},
     )
 
 
 class PlaceholderFaceDetector:
-    """Stands in for SCRFD."""
+    """Used when no SCRFD model file is configured."""
 
-    _REQUIREMENT = "SCRFD adapter + ARGUS_DETECTOR_MODEL_PATH"
+    _REQUIREMENT = "ARGUS_MODEL_ROOT or ARGUS_DETECTOR_MODEL_PATH (det_10g.onnx)"
 
     def status(self) -> ComponentStatus:
         return ComponentStatus(
             name="face_detector",
             configured=False,
             adapter="placeholder",
-            detail=f"not implemented; requires {self._REQUIREMENT}",
+            detail=f"no model configured; set {self._REQUIREMENT}",
         )
 
     def detect(self, image: Image) -> list[DetectedFace]:
@@ -49,37 +45,20 @@ class PlaceholderFaceDetector:
 
 
 class PlaceholderFaceEmbedder:
-    """Stands in for ArcFace."""
+    """Used when no ArcFace model file is configured."""
 
-    _REQUIREMENT = "ArcFace adapter + ARGUS_EMBEDDER_MODEL_PATH"
+    _REQUIREMENT = "ARGUS_MODEL_ROOT or ARGUS_EMBEDDER_MODEL_PATH (w600k_r50.onnx)"
 
     def status(self) -> ComponentStatus:
         return ComponentStatus(
             name="face_embedder",
             configured=False,
             adapter="placeholder",
-            detail=f"not implemented; requires {self._REQUIREMENT}",
+            detail=f"no model configured; set {self._REQUIREMENT}",
         )
 
     def embed(self, aligned_faces: Sequence[Image]) -> Embedding:
         raise _unavailable("face embedder (ArcFace)", self._REQUIREMENT)
-
-
-class PlaceholderMaskSynthesizer:
-    """Stands in for MaskTheFace / RWMFD synthetic mask generation."""
-
-    _REQUIREMENT = "MaskTheFace adapter + ARGUS_MASK_SYNTHESIZER_ROOT"
-
-    def status(self) -> ComponentStatus:
-        return ComponentStatus(
-            name="mask_synthesizer",
-            configured=False,
-            adapter="placeholder",
-            detail=f"not implemented; requires {self._REQUIREMENT}",
-        )
-
-    def synthesize(self, aligned_face: Image) -> dict[str, Image]:
-        raise _unavailable("mask synthesizer (MaskTheFace)", self._REQUIREMENT)
 
 
 class UnconfiguredTemplateIndex:

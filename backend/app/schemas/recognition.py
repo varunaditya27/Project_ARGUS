@@ -39,6 +39,39 @@ class FrameResult(ApiModel):
     faces: list[FaceDecisionOut]
 
 
+class BatchItemResult(ApiModel):
+    """One archive entry or one sampled video frame."""
+
+    source: str
+    faces: int = 0
+    matched: int = 0
+    human_review: int = 0
+    unknown: int = 0
+    error: str | None = None
+
+
+class BatchRecognitionResult(ApiModel):
+    """Outcome of an offline run over a video or an archive of stills."""
+
+    request_id: str
+    session_id: uuid.UUID | None = None
+    processed: int
+    skipped: int
+    faces_detected: int
+    matched: int
+    human_review: int
+    unknown: int
+    attendance_observations: int = Field(
+        description="Distinct students handed to the capture buffer for this session. Absence is "
+        "still only computed when the session is closed."
+    )
+    latency_ms: float = Field(ge=0)
+    items: list[BatchItemResult]
+    items_truncated: bool = Field(
+        default=False, description="True when per-item detail was capped for response size."
+    )
+
+
 class EnrollmentResult(ApiModel):
     student_id: uuid.UUID
     templates_stored: int

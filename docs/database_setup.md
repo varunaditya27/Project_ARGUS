@@ -97,36 +97,51 @@ alembic upgrade head --sql
 
 ## 4. Schema mapping decisions
 
-The four tables, their columns, types and constraints are taken from
-`docs/db.md` unchanged. **No table and no column was added.** Everything below is
-either a decision about how to *use* the documented schema, or an addition that
-introduces no new data - indexes, CHECK constraints over already-documented
-value sets, and foreign-key delete rules.
+The DDL is a literal materialisation of `docs/db.md`: the four tables, their
+columns and types, the primary keys, `UNIQUE(roll_no)`, `UNIQUE(session_id,
+student_id)` and the four foreign keys. **Nothing else is created** - no extra
+index, no CHECK constraint, no `ON DELETE` rule. `alembic upgrade head --sql`
+prints exactly the schema the document describes and nothing more.
 
-### 4.1 Additions (no new data, no new columns)
+### 4.1 What the schema therefore does *not* do for you
 
-| Object | Type | Why it exists |
-|---|---|---|
-| `ix_students_class_id_roll_no` | index | Roster scan and keyset pagination for a classroom. Without it every roster read at 20 000 students is a sequential scan. |
-| `ix_class_sessions_class_id_date` | index | Timetable listings filtered by classroom and date. |
-| `uq_class_sessions_active_per_class` | **partial unique index** on `class_id WHERE status = 'ACTIVE'` | `docs/db.md` says recognition must "Fetch Active Class Session". That has one answer only if one session per classroom can be ACTIVE. Enforced in the database so two concurrent writers cannot both succeed. |
-| `ix_attendance_student_id` | index | Per-student attendance history. (Session-scoped reads already use the documented `UNIQUE(session_id, student_id)` index.) |
-| `ck_class_sessions_status_domain` | CHECK | `status IN ('ACTIVE','CLOSED')` - the vocabulary already documented for the column. |
-| `ck_attendance_status_domain` | CHECK | `status IN ('Present','Absent')` - same. |
-| `ck_attendance_confidence_range` | CHECK | `-1.0 <= confidence <= 1.0`, the cosine-similarity domain used in `docs/design.md`. |
-| `ck_class_sessions_time_range` | CHECK | `end_time > start_time`. |
-| `ck_classrooms_semester_positive`, `ck_classrooms_strength_non_negative` | CHECK | Reject nonsense values on input. |
+Two guarantees that a constraint would normally provide are upheld by the
+service layer instead. If you write to these tables from anything other than
+this API, they are yours to maintain.
 
-Foreign-key delete rules (`docs/db.md` does not specify them):
+| Guarantee | Where it lives now |
+|---|---|
+| At most one `ACTIVE` session per classroom | `SessionService.create` takes a transaction-scoped advisory lock keyed on `class_id` (`pg_advisory_xact_lock`), re-checks for an ACTIVE session and inserts inside the same transaction. `docs/db.md` requires recognition to "Fetch Active Class Session", which only has one answer if this holds. A direct `INSERT` bypasses it. |
+| Deleting a student removes their attendance | The foreign keys have no `ON DELETE`, i.e. `NO ACTION`, so PostgreSQL refuses to delete a student who has ever been marked present. `StudentService.delete` deletes the attendance rows first, in the same transaction (acceptance test AT-11). |
 
-| Foreign key | Rule | Reason |
-|---|---|---|
-| `attendance.session_id -> class_sessions` | `CASCADE` | A deleted session has no attendance. |
-| `attendance.student_id -> students` | `CASCADE` | Acceptance test AT-11: deleting an identity removes its records. |
-| `students.class_id -> classrooms` | `SET NULL` | A student outlives a classroom reorganisation; `class_id` is nullable in `docs/db.md`. |
-| `class_sessions.class_id -> classrooms` | `RESTRICT` | Deleting a classroom that has taught sessions would orphan the attendance history. |
+Two further consequences to be aware of:
 
-### 4.2 Interpretations you need to know
+* **Deleting a classroom fails** while any student or session still references it.
+  Reassign or remove them first. There is no classroom-delete endpoint.
+* **Value ranges are validated at the API boundary, not in the database.**
+  Pydantic rejects `semester < 1`, `strength < 0`, `end_time <= start_time` and a
+  confidence outside `[-1, 1]` before any statement runs, but a direct `INSERT`
+  can still write nonsense.
+
+### 4.2 Performance without the indexes
+
+Only the indexes PostgreSQL creates for the documented primary keys and unique
+constraints exist. For a 20 000 student roster that is enough, because the two
+hot paths are already covered or are cheap sequential work:
+
+| Query | Plan |
+|---|---|
+| Attendance register for a session | Uses the `UNIQUE(session_id, student_id)` index; `session_id` is its leading column. |
+| Interval flush (`upsert_present`) | Same index arbitrates the `ON CONFLICT`. |
+| Absence pass at session close | Sequential scan of `students` filtered by `class_id`, anti-joined against the session's attendance rows. One pass over 20 000 narrow rows. |
+| Roster listing, keyset paged by `roll_no` | Uses the `UNIQUE(roll_no)` index for ordering; the `class_id` filter is applied as a predicate. |
+| Per-student attendance history | Sequential scan of `attendance` filtered by `student_id`. This is the one path that would benefit from an index if history grows large. |
+
+If a deployment outgrows this, add indexes as a separate migration - they are
+pure performance and change no behaviour. See `docs/benchmarks.md` for measured
+numbers.
+
+### 4.3 Interpretations you need to know
 
 **`attendance.timestamp` = first sighting.** A student is typically recognised
 in many capture intervals. The single row keeps the **earliest** detection - the
@@ -156,7 +171,7 @@ documented. It is also the pagination cursor for roster and register listings.
 **All timestamps are naive UTC.** The columns are `TIMESTAMP` (no time zone), so
 the backend writes UTC and never local time. Clients should render in local time.
 
-### 4.3 Gaps to be aware of (nothing was added for them)
+### 4.4 Gaps to be aware of (nothing was added for them)
 
 | Gap | Effect today | Options if you want it |
 |---|---|---|
@@ -164,7 +179,7 @@ the backend writes UTC and never local time. Clients should render in local time
 | No table for template metadata | `docs/design.md` says PostgreSQL stores "template information"; `docs/db.md` has no such table. Template metadata therefore lives **only** in Chroma (`student_id`, `mask_type`, `model_version`). | Works as-is; only limits SQL-side reporting on templates. |
 | No users/roles table | The API is unauthenticated. Anyone who can reach it can open a session or delete a student. | Put it behind a gateway/VPN, or add auth once a table is approved. |
 | No `closed_at` on sessions | The close instant is recoverable from the `Absent` rows' timestamp, not from the session row. | Acceptable; noted so nobody looks for the column. |
-| No bulk student import endpoint | A 20 000 row roster has to be POSTed one student at a time over HTTP. The repository already has `bulk_insert` (used by the benchmarks); only the endpoint is missing. | One route away if you want it. |
+| No import-job table | `POST /students/import` reports its per-row outcome in the HTTP response only. If the caller loses the response, the outcome is not recoverable from the database, and the trail for orphaned R2 objects is the application log. | Needs a new table - not created. |
 
 ---
 
@@ -229,10 +244,23 @@ never leave searchable vectors pointing at a deleted identity.
 
 ## 7. Cloudflare R2
 
-The backend does not upload. Your enrollment client puts the image in R2 and
-sends the resulting URL as `students.image_url`, which is validated as an
-absolute HTTP(S) URL. `ARGUS_OBJECT_STORAGE_MODE` / `ARGUS_R2_PUBLIC_BASE_URL`
-are placeholders reserved for the day the backend does the upload itself.
+| Variable | Values | Notes |
+|---|---|---|
+| `ARGUS_OBJECT_STORAGE_MODE` | `disabled` \| `r2` | `disabled` makes any import that carries images answer 503 rather than invent a URL. |
+| `ARGUS_R2_ENDPOINT_URL` | `https://<account>.r2.cloudflarestorage.com` | Required for `r2`. |
+| `ARGUS_R2_BUCKET` | bucket name | Required for `r2`. |
+| `ARGUS_R2_ACCESS_KEY_ID` / `ARGUS_R2_SECRET_ACCESS_KEY` | credentials | Required for `r2`. Needs the extra: `pip install -e '.[storage]'`. |
+| `ARGUS_R2_PUBLIC_BASE_URL` | `https://images.example.edu` | Required for `r2`; the prefix written into `students.image_url`. |
+| `ARGUS_R2_KEY_PREFIX` | `enrollment` | Object key prefix. |
+
+There are two ways an enrollment image gets a URL. `POST /students` takes an
+`image_url` your client has already uploaded, and the backend only validates and
+stores it. `POST /students/import` accepts a ZIP of photographs and uploads each
+one itself before writing the row, because `students.image_url` is `NOT NULL`.
+See `docs/registration_import.md`.
+
+Objects are never deleted by the backend. If an import's insert fails after its
+images were uploaded, the orphaned keys are logged at `ERROR` for reconciliation.
 
 ---
 

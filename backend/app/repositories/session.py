@@ -4,11 +4,21 @@ import datetime as dt
 import uuid
 from collections.abc import Sequence
 
-from sqlalchemy import select, update
+from sqlalchemy import select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import ClassSession
 from app.domain.enums import SessionStatus
+
+#: Arbitrary namespace so ARGUS locks cannot collide with another application's
+#: advisory locks on the same database.
+ACTIVE_SESSION_LOCK_NAMESPACE = 0x41475553
+
+#: Transaction-scoped, so it is released by COMMIT or ROLLBACK without any
+#: unlock call -- there is no path where a crashed request leaves it held.
+_LOCK_ACTIVE_SLOT = text(
+    "SELECT pg_advisory_xact_lock(:namespace, hashtext(CAST(:class_id AS text)))"
+)
 
 
 class ClassSessionRepository:
@@ -47,12 +57,30 @@ class ClassSessionRepository:
         stmt = select(ClassSession).where(ClassSession.session_id == session_id).with_for_update()
         return (await self._session.execute(stmt)).scalar_one_or_none()
 
-    async def get_active_for_class(self, class_id: uuid.UUID) -> ClassSession | None:
+    async def lock_active_slot(self, class_id: uuid.UUID) -> None:
+        """Serialise "is this classroom already ACTIVE?" against other writers.
+
+        ``docs/db.md`` declares no partial unique index, so the single-ACTIVE-
+        session rule the recognition workflow depends on cannot be enforced by a
+        constraint. This lock makes the read-then-insert atomic instead, at the
+        cost of one round trip on session creation only.
+        """
+        await self._session.execute(
+            _LOCK_ACTIVE_SLOT,
+            {"namespace": ACTIVE_SESSION_LOCK_NAMESPACE, "class_id": str(class_id)},
+        )
+
+    async def list_active_for_class(self, class_id: uuid.UUID) -> Sequence[ClassSession]:
+        """Every ACTIVE session for a classroom.
+
+        Returns a sequence rather than a single row because nothing in the schema
+        guarantees there is at most one; callers decide what a second one means.
+        """
         stmt = select(ClassSession).where(
             ClassSession.class_id == class_id,
             ClassSession.status == SessionStatus.ACTIVE.value,
         )
-        return (await self._session.execute(stmt)).scalar_one_or_none()
+        return (await self._session.execute(stmt)).scalars().all()
 
     async def list(
         self,

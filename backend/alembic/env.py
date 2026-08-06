@@ -21,17 +21,23 @@ config = context.config
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
-settings = get_settings()
-if not settings.database_url:
-    raise RuntimeError("ARGUS_DATABASE_URL must be set before running migrations")
-config.set_main_option("sqlalchemy.url", settings.database_url)
-
 target_metadata = Base.metadata
+
+#: Set by callers that already own a (sync) connection - tests and deploy scripts.
+#: When present it decides the target database, so no URL is needed or read.
+_EXISTING_CONNECTION = config.attributes.get("connection")
+
+
+def _configured_url() -> str:
+    url = get_settings().database_url
+    if not url:
+        raise RuntimeError("ARGUS_DATABASE_URL must be set before running migrations")
+    return url
 
 
 def run_migrations_offline() -> None:
     context.configure(
-        url=config.get_main_option("sqlalchemy.url"),
+        url=_configured_url(),
         target_metadata=target_metadata,
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
@@ -48,6 +54,7 @@ def _run(connection) -> None:
 
 
 async def run_migrations_online() -> None:
+    config.set_main_option("sqlalchemy.url", _configured_url())
     engine = async_engine_from_config(
         config.get_section(config.config_ini_section, {}),
         prefix="sqlalchemy.",
@@ -57,9 +64,6 @@ async def run_migrations_online() -> None:
         await connection.run_sync(_run)
     await engine.dispose()
 
-
-#: Set by callers that already own a (sync) connection - tests and deploy scripts.
-_EXISTING_CONNECTION = config.attributes.get("connection")
 
 if context.is_offline_mode():
     run_migrations_offline()

@@ -1,7 +1,9 @@
 """Builds the recognition stack from settings.
 
-Single place where "which adapter is in use" is decided, so swapping a
-placeholder for a real model is a one-line change here.
+Single place where "which adapter is in use" is decided. A component falls back
+to its placeholder only when the corresponding model file is not configured, so a
+deployment either runs the real model or fails loudly - never something in
+between.
 """
 
 from __future__ import annotations
@@ -9,13 +11,16 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from app.core.config import Settings
+from app.core.logging import get_logger
+from app.recognition.adapters.arcface import ArcFaceEmbedder
 from app.recognition.adapters.chroma_index import ChromaTemplateIndex
+from app.recognition.adapters.mask_synthesis import GeometricMaskSynthesizer
 from app.recognition.adapters.placeholder import (
     PlaceholderFaceDetector,
     PlaceholderFaceEmbedder,
-    PlaceholderMaskSynthesizer,
     UnconfiguredTemplateIndex,
 )
+from app.recognition.adapters.scrfd import ScrfdFaceDetector
 from app.recognition.decision import Thresholds
 from app.recognition.ports import (
     ComponentStatus,
@@ -24,6 +29,8 @@ from app.recognition.ports import (
     MaskSynthesizer,
     TemplateIndex,
 )
+
+logger = get_logger(__name__)
 
 
 @dataclass(frozen=True, slots=True)
@@ -52,9 +59,23 @@ class RecognitionStack:
 
     @property
     def model_version(self) -> str:
-        """Version tag written into Chroma metadata for every stored template."""
+        """Version tag written into Chroma metadata for every stored template.
+
+        Templates produced by different model files must be distinguishable, so
+        the tag is the adapter plus the model file name rather than a constant.
+        """
         embedder = self.embedder.status()
-        return f"{embedder.adapter}:{embedder.detail}" if embedder.configured else "unconfigured"
+        if not embedder.configured:
+            return "unconfigured"
+        model_file = embedder.detail.split(" ", 1)[0]
+        return f"{embedder.adapter}/{model_file}"
+
+    def warmup(self) -> None:
+        """Load every configured model so /health reports the truth before traffic."""
+        for component in (self.detector, self.embedder):
+            warmup = getattr(component, "warmup", None)
+            if callable(warmup):
+                warmup()
 
 
 def build_template_index(settings: Settings) -> TemplateIndex:
@@ -73,13 +94,47 @@ def build_template_index(settings: Settings) -> TemplateIndex:
     return UnconfiguredTemplateIndex()
 
 
+def build_face_detector(settings: Settings) -> FaceDetector:
+    path = settings.resolved_detector_path
+    if path is None:
+        logger.warning(
+            "No detector model configured; set ARGUS_MODEL_ROOT or "
+            "ARGUS_DETECTOR_MODEL_PATH to enable face detection"
+        )
+        return PlaceholderFaceDetector()
+    return ScrfdFaceDetector(
+        path,
+        providers=tuple(settings.onnx_providers),
+        intra_op_threads=settings.onnx_intra_op_threads,
+        input_size=settings.detection_input_size,
+        score_threshold=settings.detection_score_threshold,
+        nms_iou=settings.detection_nms_iou,
+        max_faces=settings.detection_max_faces,
+    )
+
+
+def build_face_embedder(settings: Settings) -> FaceEmbedder:
+    path = settings.resolved_embedder_path
+    if path is None:
+        logger.warning(
+            "No embedding model configured; set ARGUS_MODEL_ROOT or "
+            "ARGUS_EMBEDDER_MODEL_PATH to enable recognition"
+        )
+        return PlaceholderFaceEmbedder()
+    return ArcFaceEmbedder(
+        path,
+        providers=tuple(settings.onnx_providers),
+        intra_op_threads=settings.onnx_intra_op_threads,
+        embedding_dim=settings.embedding_dim,
+    )
+
+
 def build_recognition_stack(settings: Settings) -> RecognitionStack:
     return RecognitionStack(
-        # Replace these three with the SCRFD / ArcFace / MaskTheFace adapters once
-        # they exist; nothing else in the backend needs to change.
-        detector=PlaceholderFaceDetector(),
-        embedder=PlaceholderFaceEmbedder(),
-        mask_synthesizer=PlaceholderMaskSynthesizer(),
+        detector=build_face_detector(settings),
+        embedder=build_face_embedder(settings),
+        # Purely geometric, so it needs no model file of its own.
+        mask_synthesizer=GeometricMaskSynthesizer(settings.mask_variants),
         index=build_template_index(settings),
         thresholds=Thresholds(
             match=settings.match_threshold,

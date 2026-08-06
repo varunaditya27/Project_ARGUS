@@ -10,6 +10,7 @@ Skipped automatically when the variable is absent.
 
 from __future__ import annotations
 
+import asyncio
 import datetime as dt
 import uuid
 from collections.abc import AsyncIterator
@@ -184,18 +185,71 @@ async def test_absent_rows_carry_the_documented_sentinel(container: Container) -
     assert all(record.timestamp == report.closed_at for record, _, _ in rows)
 
 
-async def test_one_active_session_per_classroom(container: Container) -> None:
-    classroom, _, _ = await seed(container)
-    duplicate = SessionCreate(
-        class_id=classroom.class_id,
+def second_lecture(class_id: uuid.UUID) -> SessionCreate:
+    return SessionCreate(
+        class_id=class_id,
         subject="Second lecture",
         faculty="Dr. Placeholder",
         date=dt.date(2026, 8, 6),
         start_time=dt.time(11, 0),
         end_time=dt.time(12, 0),
     )
+
+
+async def test_one_active_session_per_classroom(container: Container) -> None:
+    classroom, _, _ = await seed(container)
     with pytest.raises(ConflictError):
-        await container.services.sessions.create(duplicate)
+        await container.services.sessions.create(second_lecture(classroom.class_id))
+
+
+async def test_concurrent_opens_cannot_both_win(container: Container) -> None:
+    """The schema has no partial unique index, so the advisory lock is the guarantee."""
+    classroom = await container.services.classrooms.create(
+        ClassroomCreate(class_name="CSE-B", department="CSE", semester=5, strength=0)
+    )
+    payload = second_lecture(classroom.class_id)
+
+    results = await asyncio.gather(
+        *(container.services.sessions.create(payload) for _ in range(4)),
+        return_exceptions=True,
+    )
+    created = [result for result in results if not isinstance(result, BaseException)]
+    rejected = [result for result in results if isinstance(result, ConflictError)]
+    assert len(created) == 1
+    assert len(rejected) == 3
+
+    active = await container.services.sessions.get_active_for_class(classroom.class_id)
+    assert active.session_id == created[0].session_id
+
+
+async def test_a_classroom_can_open_a_new_session_once_the_first_closes(
+    container: Container,
+) -> None:
+    classroom, _, session = await seed(container)
+    await container.services.attendance.close_session(session.session_id)
+
+    reopened = await container.services.sessions.create(second_lecture(classroom.class_id))
+    assert reopened.status == SessionStatus.ACTIVE
+    active = await container.services.sessions.get_active_for_class(classroom.class_id)
+    assert active.session_id == reopened.session_id
+
+
+async def test_deleting_a_student_removes_their_attendance(container: Container) -> None:
+    """AT-11. The foreign keys carry no ON DELETE, so the service must clear them."""
+    _, roster, session = await seed(container)
+    student = roster[0]
+    attendance = container.services.attendance
+
+    await attendance.record(session.session_id, [Observation(student.student_id, 0.81, T0)])
+    await attendance.flush_session(session.session_id)
+    assert (await attendance.summary(session.session_id)).present == 1
+
+    await container.services.students.delete(student.student_id)
+
+    with pytest.raises(NotFoundError):
+        await container.services.students.get(student.student_id)
+    summary = await attendance.summary(session.session_id)
+    assert (summary.present, summary.roster_count) == (0, 2)
 
 
 async def test_duplicate_roll_number_is_rejected(container: Container) -> None:

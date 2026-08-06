@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import datetime as dt
 import uuid
 
 from fastapi import APIRouter, Depends, File, Form, UploadFile, WebSocket, WebSocketDisconnect
@@ -8,7 +9,7 @@ from app.api.deps import RecognitionServiceDep, get_container_ws
 from app.container import Container
 from app.core.errors import ArgusError, DependencyNotConfiguredError, error_body
 from app.core.logging import get_logger
-from app.schemas.recognition import FrameResult
+from app.schemas.recognition import BatchRecognitionResult, FrameResult
 
 logger = get_logger(__name__)
 router = APIRouter(tags=["recognition"])
@@ -33,6 +34,44 @@ async def recognize(
     Returns 503 until the SCRFD/ArcFace adapters and the Chroma collection exist.
     """
     return await service.recognize(await frame.read(), session_id=session_id, frame_id=frame_id)
+
+
+@router.post("/recognize/video", response_model=BatchRecognitionResult)
+async def recognize_video(
+    service: RecognitionServiceDep,
+    video: UploadFile = File(
+        description="Recorded video (MP4/AVI/MKV, subject to the OpenCV build)."
+    ),
+    session_id: uuid.UUID | None = Form(default=None),
+    recorded_at: dt.datetime | None = Form(
+        default=None,
+        description="When the recording started. Supplying it timestamps each sampled frame at "
+        "recorded_at + frame_index / fps, so the register reflects the recording rather than the "
+        "upload. Omit it and the upload instant is used for every frame.",
+    ),
+) -> BatchRecognitionResult:
+    """Offline attendance run over a recorded video.
+
+    Every Nth frame (`ARGUS_VIDEO_FRAME_STRIDE`) is recognised and fed through the
+    same capture buffer as the live stream, so absence is still only decided when
+    the session is closed.
+    """
+    return await service.recognize_video(
+        await video.read(), session_id=session_id, recorded_at=recorded_at
+    )
+
+
+@router.post("/recognize/batch", response_model=BatchRecognitionResult)
+async def recognize_batch(
+    service: RecognitionServiceDep,
+    archive: UploadFile = File(description="ZIP archive of still images."),
+    session_id: uuid.UUID | None = Form(default=None),
+    recorded_at: dt.datetime | None = Form(default=None),
+) -> BatchRecognitionResult:
+    """Offline attendance run over an archive of stills."""
+    return await service.recognize_batch(
+        await archive.read(), session_id=session_id, recorded_at=recorded_at
+    )
 
 
 @router.websocket("/live")

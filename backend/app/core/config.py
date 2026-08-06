@@ -63,9 +63,13 @@ class Settings(BaseSettings):
     minimum_margin: float | None = Field(default=None, ge=0.0, le=2.0)
 
     # ------------------------------------------------------------ model adapters
+    #: Directory holding the InsightFace buffalo_l ONNX pack. Individual paths
+    #: below override it; leaving everything unset keeps the placeholders active.
+    model_root: Path | None = None
     detector_model_path: Path | None = None
     embedder_model_path: Path | None = None
-    mask_synthesizer_root: Path | None = None
+    #: 2d106det.onnx - dense landmarks used to place the synthetic masks.
+    landmark_model_path: Path | None = None
     embedding_dim: int = Field(default=512, ge=1)
     mask_variants: CsvList = Field(
         default_factory=lambda: [
@@ -77,6 +81,30 @@ class Settings(BaseSettings):
             "improper_low",
         ]
     )
+
+    # ----------------------------------------------------------- onnx runtime
+    onnx_providers: CsvList = Field(default_factory=lambda: ["CPUExecutionProvider"])
+    #: 0 leaves onnxruntime's own default thread count in place.
+    onnx_intra_op_threads: int = Field(default=0, ge=0)
+    detection_input_size: int = Field(default=640, ge=128, le=1920)
+    detection_score_threshold: float = Field(default=0.5, ge=0.0, le=1.0)
+    detection_nms_iou: float = Field(default=0.4, ge=0.0, le=1.0)
+    detection_max_faces: int = Field(default=100, ge=1)
+
+    # --------------------------------------------------------- batch / video input
+    #: Offline attendance runs: a recorded video or an archive of stills replayed
+    #: through the same capture path as the live WebSocket.
+    video_max_bytes: int = Field(default=256 * 1024 * 1024, ge=1024)
+    #: Process every Nth frame; 1 processes every frame.
+    video_frame_stride: int = Field(default=5, ge=1)
+    video_max_frames: int = Field(default=5_000, ge=1)
+    batch_max_archive_bytes: int = Field(default=256 * 1024 * 1024, ge=1024)
+    batch_max_files: int = Field(default=2_000, ge=1)
+
+    # ------------------------------------------------------- registration import
+    import_max_csv_bytes: int = Field(default=16 * 1024 * 1024, ge=1024)
+    import_max_archive_bytes: int = Field(default=1024 * 1024 * 1024, ge=1024)
+    import_max_rows: int = Field(default=50_000, ge=1)
 
     # Enrollment image quality gates (docs/design.md step 2). Null = gate is
     # reported as uncalibrated and skipped rather than applied with a guessed value.
@@ -94,12 +122,17 @@ class Settings(BaseSettings):
     chroma_search_k: int = Field(default=10, ge=1, le=200)
 
     # ---------------------------------------------------------- object storage
-    # Enrollment images live in Cloudflare R2 (docs/db.md). The backend stores
-    # only the resulting URL in students.image_url.
+    # Enrollment images live in Cloudflare R2 (docs/db.md). The backend uploads
+    # them and stores only the resulting URL in students.image_url.
     object_storage_mode: ObjectStorageMode = "disabled"
+    r2_endpoint_url: str | None = None
+    r2_bucket: str | None = None
+    r2_access_key_id: str | None = None
+    r2_secret_access_key: str | None = None
     r2_public_base_url: str | None = None
+    r2_key_prefix: str = "enrollment"
 
-    @field_validator("cors_origins", "mask_variants", mode="before")
+    @field_validator("cors_origins", "mask_variants", "onnx_providers", mode="before")
     @classmethod
     def _split_csv(cls, value: object) -> object:
         if isinstance(value, str):
@@ -119,10 +152,17 @@ class Settings(BaseSettings):
             raise ValueError(
                 "ARGUS_CHROMA_HOST and ARGUS_CHROMA_PORT are required when ARGUS_CHROMA_MODE=http"
             )
-        if self.object_storage_mode == "r2" and not self.r2_public_base_url:
-            raise ValueError(
-                "ARGUS_R2_PUBLIC_BASE_URL is required when ARGUS_OBJECT_STORAGE_MODE=r2"
-            )
+        if self.object_storage_mode == "r2":
+            required = {
+                "ARGUS_R2_ENDPOINT_URL": self.r2_endpoint_url,
+                "ARGUS_R2_BUCKET": self.r2_bucket,
+                "ARGUS_R2_ACCESS_KEY_ID": self.r2_access_key_id,
+                "ARGUS_R2_SECRET_ACCESS_KEY": self.r2_secret_access_key,
+                "ARGUS_R2_PUBLIC_BASE_URL": self.r2_public_base_url,
+            }
+            missing = sorted(name for name, value in required.items() if not value)
+            if missing:
+                raise ValueError(f"{', '.join(missing)} required when ARGUS_OBJECT_STORAGE_MODE=r2")
         thresholds = (self.match_threshold, self.review_threshold, self.minimum_margin)
         if all(value is not None for value in thresholds):
             assert self.match_threshold is not None and self.review_threshold is not None
@@ -133,6 +173,24 @@ class Settings(BaseSettings):
     @property
     def thresholds_calibrated(self) -> bool:
         return None not in (self.match_threshold, self.review_threshold, self.minimum_margin)
+
+    def _model_file(self, explicit: Path | None, filename: str) -> Path | None:
+        """Explicit path wins; otherwise fall back to the buffalo_l pack layout."""
+        if explicit is not None:
+            return explicit
+        return self.model_root / filename if self.model_root is not None else None
+
+    @property
+    def resolved_detector_path(self) -> Path | None:
+        return self._model_file(self.detector_model_path, "det_10g.onnx")
+
+    @property
+    def resolved_embedder_path(self) -> Path | None:
+        return self._model_file(self.embedder_model_path, "w600k_r50.onnx")
+
+    @property
+    def resolved_landmark_path(self) -> Path | None:
+        return self._model_file(self.landmark_model_path, "2d106det.onnx")
 
 
 @lru_cache

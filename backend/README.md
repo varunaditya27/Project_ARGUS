@@ -87,10 +87,11 @@ backend/
 │   │   ├── decision.py         MATCH | HUMAN_REVIEW | UNKNOWN policy (pure)
 │   │   ├── alignment.py        ArcFace 5-point alignment
 │   │   ├── factory.py          which adapter is wired in
-│   │   └── adapters/           chroma_index.py (real), placeholder.py (503)
+│   │   └── adapters/           scrfd, arcface, mask_synthesis, chroma_index, placeholder
 │   ├── repositories/           SQL: set-based upserts, keyset paging
 │   ├── schemas/                request/response models
-│   └── services/               use cases, one transaction per operation
+│   ├── services/               use cases, one transaction per operation
+│   └── storage/                Cloudflare R2 upload for roster import
 ├── alembic/                    0001_initial_schema = docs/db.md
 ├── benchmarks/                 db_scale.py, vector_search.py
 └── tests/
@@ -105,29 +106,58 @@ torch/insightface installed.
 
 ## Recognition status
 
-`SCRFD`, `ArcFace` and `MaskTheFace` are **not implemented**. Their adapters in
-`app/recognition/adapters/placeholder.py` contain no model, no heuristic and no
-fabricated output: each call raises `503` naming the component, the missing
-configuration and the file to implement. `POST /recognize`, `WS /live`,
-`POST /students/{id}/enroll` and `GET /students/{id}/templates` are wired
-end-to-end and start working the moment a real adapter is registered in
-`app/recognition/factory.py`.
+The vision stack is implemented and runs on `onnxruntime` against the InsightFace
+`buffalo_l` ONNX pack - no torch, no `insightface` package at serving time.
 
-The Chroma template index is a real implementation and works today
-(`ARGUS_CHROMA_MODE=persistent|http`).
+| Component | Adapter | Model |
+|---|---|---|
+| Detection + 5-point landmarks | `adapters/scrfd.py` | `det_10g.onnx` |
+| Embedding (512-d, L2-normalised) | `adapters/arcface.py` | `w600k_r50.onnx` |
+| Mask variants | `adapters/mask_synthesis.py` | none - geometric, in the aligned frame |
+| Template index | `adapters/chroma_index.py` | ChromaDB, cosine |
 
-The decision thresholds from `docs/design.md` are still `null`. Until all three
-are set, `decide()` cannot return `MATCH`, so nothing is auto-marked - the API
-returns `HUMAN_REVIEW` with that reason instead of inventing a threshold.
+```bash
+pip install -e ".[recognition]"
+export ARGUS_MODEL_ROOT=../models/buffalo_l
+```
 
-### Implementing a model adapter
+The weights are **not in the repository** - the pack is ~197 MB and
+`w600k_r50.onnx` alone is over GitHub's 100 MB per-file limit, so `models/` is
+git-ignored. Download the InsightFace `buffalo_l` pack and unpack it so the
+repository root looks like this:
+
+```text
+models/buffalo_l/
+├── det_10g.onnx        detection + 5 landmarks   (used)
+├── w600k_r50.onnx      512-d embedding           (used)
+├── 2d106det.onnx       dense landmarks           (not used - see below)
+└── genderage.onnx      age/gender                (not used)
+```
+
+Models load lazily and are warmed at startup, so `GET /models` reports the truth
+before the first request. Leave `ARGUS_MODEL_ROOT` unset and the placeholders in
+`adapters/placeholder.py` stay active: they contain no model, no heuristic and no
+fabricated output, and each call raises `503` naming the missing configuration.
+
+Two files in the pack are **not used**: `2d106det.onnx` (dense landmarks - the
+mask synthesiser works in the aligned canonical frame, where the geometry is
+already known, so it needs no per-face landmarks) and `genderage.onnx` (not an
+attendance concern). `ARGUS_LANDMARK_MODEL_PATH` is wired through config for the
+day a mask synthesiser wants it.
+
+**Thresholds are still `null`**, which is the one thing standing between this and
+automatic attendance. Until all three are set, `decide()` cannot return `MATCH`,
+so nothing is auto-marked - the API returns `HUMAN_REVIEW` with that reason
+instead of inventing a threshold. See `docs/benchmarks.md` section 4.
+
+### Adding or replacing an adapter
 
 1. Add a class satisfying the protocol in `app/recognition/ports.py`.
 2. Register it in `build_recognition_stack()` in `app/recognition/factory.py`.
 3. Add its runtime dependency to the `recognition` extra in `pyproject.toml`.
 
-Nothing else changes: alignment, decision logic, capture and persistence are
-already in place, and `GET /models` starts reporting the component as configured.
+Nothing else changes: alignment, decision logic, capture and persistence sit
+behind the ports, and `GET /models` reports whatever is wired in.
 
 ---
 
