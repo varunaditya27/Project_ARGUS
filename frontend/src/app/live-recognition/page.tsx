@@ -41,17 +41,47 @@ export default function LiveRecognitionPage() {
 
   const session = sessions.data?.items.find((item) => item.session_id === sessionId);
   const roster = useQuery({
-    queryKey: ["students", session?.class_id],
-    queryFn: () => studentService.listStudents({ classId: session?.class_id, limit: 200 }),
-    enabled: Boolean(session?.class_id),
+    queryKey: ["students", session?.class_id ?? "all"],
+    queryFn: () => studentService.listStudents({ classId: session?.class_id || undefined, limit: 500 }),
   });
 
+  const [fetchedNames, setFetchedNames] = useState<Record<string, string>>({});
+
+  useEffect(() => {
+    const missingIds = faces
+      .map((f) => f.student_id)
+      .filter(
+        (id): id is string =>
+          typeof id === "string" &&
+          Boolean(id) &&
+          !fetchedNames[id] &&
+          !roster.data?.items.some((student) => student.student_id === id)
+      );
+
+    if (missingIds.length === 0) return;
+
+    missingIds.forEach((id) => {
+      studentService
+        .getStudent(id)
+        .then((student) => {
+          setFetchedNames((prev) => ({ ...prev, [id]: student.student_name }));
+        })
+        .catch(() => {
+          setFetchedNames((prev) => ({ ...prev, [id]: "Unknown Student" }));
+        });
+    });
+  }, [faces, roster.data, fetchedNames]);
+
   const nameFor = useCallback(
-    (studentId: string | null) =>
-      roster.data?.items.find((student) => student.student_id === studentId)?.student_name ??
-      studentId?.slice(0, 8) ??
-      "—",
-    [roster.data]
+    (studentId: string | null) => {
+      if (!studentId) return "Unknown";
+      const id: string = studentId;
+      const fromRoster = roster.data?.items.find((student) => student.student_id === id)?.student_name;
+      if (fromRoster) return fromRoster;
+      if (fetchedNames[id]) return fetchedNames[id];
+      return "Resolving...";
+    },
+    [roster.data, fetchedNames]
   );
 
   // One frame in flight at a time, so a slow reply cannot build a backlog.
@@ -172,7 +202,7 @@ export default function LiveRecognitionPage() {
             faces={faces}
             frameWidth={frameSize.width}
             frameHeight={frameSize.height}
-            labelFor={(face) => (face.state === "MATCH" ? nameFor(face.student_id) : face.state)}
+            labelFor={(face) => (face.student_id ? nameFor(face.student_id) : face.state)}
           />
         ) : null}
       </WebcamViewport>
@@ -220,7 +250,7 @@ export default function LiveRecognitionPage() {
               {faces.map((face, index) => (
                 <TableRow key={`${index}-${face.bbox.join(",")}`}>
                   <TableCell className="font-medium text-[12.5px] text-[var(--ink)]">
-                    {face.state === "MATCH" ? nameFor(face.student_id) : "—"}
+                    {face.student_id ? nameFor(face.student_id) : "—"}
                   </TableCell>
                   <TableCell className="font-mono text-[11.5px] text-[var(--ink-faint)] tabular-nums">
                     {(face.detection_score * 100).toFixed(1)}%
