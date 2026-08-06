@@ -37,6 +37,7 @@ datasets/masking/masktheface/dlib_models/
 embeddings/embeddings.npz
 embeddings/chroma/
 evaluation/results.json
+evaluation/multi_template_results.json
 
 models/buffalo_l/*.onnx
 models/*.zip

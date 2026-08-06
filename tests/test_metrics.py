@@ -62,6 +62,35 @@ def test_verification_scores_skips_probes_with_no_gallery_match():
     assert len(genuine) == 1
 
 
+def test_rank1_accuracy_picks_best_of_several_templates_per_identity():
+    base = unit_vectors(1, seed=8)[0]
+    # identity "a" has 3 templates, only one of which is close to the probe
+    far1 = unit_vectors(1, seed=9)[0]
+    far2 = unit_vectors(1, seed=10)[0]
+    gallery_emb = np.stack([far1, far2, base])
+    gallery_ids = np.array(["a", "a", "a"])
+
+    probe_emb = np.stack([base + np.random.default_rng(11).normal(scale=0.01, size=512)])
+    probe_emb = probe_emb / np.linalg.norm(probe_emb, axis=1, keepdims=True)
+    probe_ids = np.array(["a"])
+
+    accuracy = metrics.rank1_accuracy(gallery_emb, gallery_ids, probe_emb, probe_ids)
+    assert accuracy == 1.0
+
+
+def test_verification_scores_genuine_is_max_across_repeated_identity_columns():
+    base = unit_vectors(1, seed=12)[0]
+    far = unit_vectors(1, seed=13)[0]
+    # identity "a" has a weak template (far) and a strong one (base) - genuine score should use the strong one
+    gallery_emb = np.stack([far, base])
+    gallery_ids = np.array(["a", "a"])
+    probe_emb = np.stack([base])
+    probe_ids = np.array(["a"])
+
+    genuine, _ = metrics.verification_scores(gallery_emb, gallery_ids, probe_emb, probe_ids, n_impostor_samples=1)
+    assert genuine[0] > 0.99
+
+
 def test_roc_auc_perfect_separation_is_one():
     genuine = np.full(20, 0.9)
     impostor = np.full(20, 0.1)

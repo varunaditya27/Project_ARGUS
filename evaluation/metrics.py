@@ -19,12 +19,15 @@ def rank1_accuracy(gallery_emb, gallery_ids, probe_emb, probe_ids):
 
 
 # collects genuine (same-identity) and sampled impostor (different-identity) similarity scores
+# gallery_ids can repeat (multi-template galleries) - genuine score is the best-matching template
 def verification_scores(gallery_emb, gallery_ids, probe_emb, probe_ids, n_impostor_samples=50, seed=42):
     rng = np.random.default_rng(seed)
     genuine_scores = []
     impostor_scores = []
 
-    id_to_col = {identity: i for i, identity in enumerate(gallery_ids)}
+    id_to_cols = {}
+    for col, identity in enumerate(gallery_ids):
+        id_to_cols.setdefault(identity, []).append(col)
 
     for start in range(0, len(probe_emb), BATCH_SIZE):
         batch_emb = probe_emb[start:start + BATCH_SIZE]
@@ -32,13 +35,15 @@ def verification_scores(gallery_emb, gallery_ids, probe_emb, probe_ids, n_impost
         sims = batch_emb @ gallery_emb.T
 
         for row_idx, identity in enumerate(batch_ids):
-            genuine_col = id_to_col.get(identity)
-            if genuine_col is None:
+            genuine_cols = id_to_cols.get(identity)
+            if genuine_cols is None:
                 continue
-            genuine_scores.append(sims[row_idx, genuine_col])
+            genuine_scores.append(sims[row_idx, genuine_cols].max())
 
-            other_cols = [c for c in range(len(gallery_ids)) if c != genuine_col]
+            other_cols = [c for c in range(len(gallery_ids)) if c not in genuine_cols]
             n_sample = min(n_impostor_samples, len(other_cols))
+            if n_sample == 0:
+                continue
             sampled_cols = rng.choice(other_cols, size=n_sample, replace=False)
             impostor_scores.extend(sims[row_idx, sampled_cols].tolist())
 
