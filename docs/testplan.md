@@ -11,7 +11,7 @@ The system must enroll a person correctly, recognize them while masked, reject s
 | ID | What we test | Expected result | Method |
 |---|---|---|---|
 | AT-01 | Enroll one clear unmasked photograph | The person and their original template are stored successfully | Automated |
-| AT-02 | Generate masks using MaskTheFace and RWMFD | Configured mask variants are created and linked to the same identity | Automated |
+| AT-02 | Generate masked variants for an enrolled identity | Configured mask variants are created and linked to the same identity - offline evaluation dataset via MaskTheFace/RWMFD (`tests/test_manifest_parsing.py`), live enrollment via the backend's own geometric synthesizer (`backend/app/recognition/adapters/masks.py`, `backend/tests/test_capture.py`) | Automated |
 | AT-03 | Upload an image with no face | Enrollment is rejected with a useful message | Automated |
 | AT-04 | Upload an image containing two or more faces | Enrollment asks for a single-person photograph | Automated |
 | AT-05 | Upload a damaged, unsupported or oversized file | The file is rejected without crashing the application | Automated |
