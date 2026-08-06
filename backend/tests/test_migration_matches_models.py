@@ -6,6 +6,8 @@ difference against ``Base.metadata`` afterwards, so the two can never drift.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 from alembic.autogenerate import compare_metadata
 from alembic.command import upgrade
@@ -23,9 +25,13 @@ IGNORED_TABLES = {"alembic_version"}
 
 
 def _upgrade_to_head(connection: Connection) -> None:
-    config = Config("alembic.ini")
+    alembic_ini = Path(__file__).parent.parent / "alembic.ini"
+    config = Config(str(alembic_ini))
+    config.set_main_option("script_location", str(alembic_ini.parent / "alembic"))
     config.attributes["connection"] = connection
     upgrade(config, "head")
+
+
 
 
 def _diff_against_models(connection: Connection) -> list:
