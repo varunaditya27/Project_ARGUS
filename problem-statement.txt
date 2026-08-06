@@ -1,0 +1,23 @@
+Problem statement 1:
+
+Masked Face Recognition: Identifying People Behind the Mask
+
+A) Background
+Videonetics' Face Recognition System performs real-time identification across camera feedsfor access control and watch-list matching, recognizing faces as small as 30×30 pixels froma gallery of up to a million faces. In practice, the enrollment gallery is built from unmaskedimages (ID photos, prior enrollments), but in the field — post-COVID norms, securityconcealment, weather, pollution — subjects frequently wear masks that occlude the lowerhalf of the face (nose, mouth, chin), which is also the most discriminative region forconventional recognizers. A face model trained on full faces learns to attend to features likethe eyes, nose, lips and face edges, so when a mask hides them the system can fail toidentify the person. The challenge is to close that gap: enroll/train on unmasked faces, yetstill recognize a person reliably when they are masked.
+
+B) Precisely Scoped Task
+Minimum viable deliverable: Train (or enroll embeddings for) a face recognition model onunmasked face images, then evaluate it on masked probe images matched against theunmasked gallery. Report rank-1 identification accuracy and/or 1:1 verification accuracy(ROC-AUC, TAR@FAR). The headline result is the masked-probe-vs-unmasked-galleryaccuracy and the generalization gap relative to the unmasked-vs-unmasked baseline.Ambitious version: Actively close the gap — synthetic mask augmentation during training,occlusion-aware or periocular (eye-region) modeling, attention to the visible upper face –and demonstrate robustness across mask types/colors and partial extra occlusion. Add 1:Nwatch-list search with confidence scoring.
+
+C) Verified Public Datasets
+• LFW (Labeled Faces in the Wild): 13,233 images, 5,749 identities; standard verificationbenchmark with matched/mismatched pairs. vis-www.cs.umass.edu/lfw
+• MaskTheFace (mask-synthesis tool, the key enabler): dlib-landmark script that warpsrealistic masks onto any unmasked face to generate masked training/test pairs; reports~38% TPR increase for FaceNet after retraining. github.com/aqeelanwar/MaskTheFace
+• MFR2 (real masked test set): 53 identities, 269 images with both masked and unmaskedfaces per identity, pre-aligned 160×160, ready pairs file. Fetch via MaskTheFace.
+• MaskedFace-Net (large synthetic): ~137,016 images (Correctly + Incorrectly Masked,~70k each) from Flickr-Faces-HQ. github.com/cabani/MaskedFace-Net
+• RMFRD / RMFD: real masked + normal faces with identity labels for recognition.github.com/X-zhangyang/Real-World-Masked-Face-Dataset
+• MAFA: 30,811 images, 35,806 masked faces — detection only, no identity labels (face-detection stage only).
+
+D) Suggested Baseline / Tech Stack
+Use InsightFace/ArcFace (buffalo_l pre-trained pack) for detection + embeddings andcosine-similarity matching to establish the unmasked baseline. Then run MaskTheFace overthe unmasked training set to create masked pairs, and either fine-tune the embedding modelor train an occlusion-robust head; evaluate the closed gap on MFR2/RMFRD. DeepFaceworks as a quick wrapper. Sanity-check target: ArcFace reaches ~99.8% on unmasked LFW— the interesting number is how much of that you retain on masked probes.
+
+E) Evaluation Rubric (100 pts)
+• Masked face recognition accuracy — rank-1 identification and/or verification accuracy onmasked probes vs unmasked gallery (35)• Generalization gap & robustness — accuracy drop vs the unmasked baseline; consistencyacross mask types/colors (15)• Technical execution & code quality (15)• Innovation — occlusion-aware/periocular architecture, augmentation strategy, smarttraining pipeline (10)• Real-world applicability & deployment feasibility (10)• Demo quality — live webcam: enroll a person unmasked, then recognize them masked inreal time (10)• Presentation & communication (5)

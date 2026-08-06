@@ -13,9 +13,15 @@ recognition endpoints backed by the InsightFace `buffalo_l` ONNX pack.
 
 ## Quick start
 
+Requires **Python 3.11+** (the code uses `enum.StrEnum`, added in 3.11 -
+`ruff.toml` targets `py311`). If your machine's default `python`/`python3`
+resolves to something older, point the venv at 3.11 explicitly
+(`python3.11 -m venv .venv`) or you'll hit
+`ImportError: cannot import name 'StrEnum' from 'enum'` on the first import.
+
 ```bash
 cd backend
-python -m venv .venv && .venv/Scripts/activate     # source .venv/bin/activate on Unix
+python3.11 -m venv .venv && .venv/Scripts/activate  # source .venv/bin/activate on Unix
 pip install -r requirements-dev.txt                # requirements.txt for runtime only
 cp .env.example .env                                # then fill in ARGUS_DATABASE_URL
 alembic upgrade head

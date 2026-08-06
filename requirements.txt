@@ -1,0 +1,16 @@
+# masking + embeddings + evaluation (this phase)
+# backend has its own separately pinned requirements.txt / requirements-dev.txt
+insightface
+numpy
+onnxruntime
+opencv-python
+scipy
+scikit-learn
+dlib
+imutils
+dotmap
+face-recognition
+face-recognition-models
+Pillow
+pytest
+chromadb

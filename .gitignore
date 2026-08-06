@@ -21,3 +21,22 @@ __pycache__/
 .DS_Store
 Thumbs.db
 .idea/
+venv/
+
+datasets/raw/
+datasets/processed/LFW_subset/
+datasets/processed/LFW_subset_masked/
+datasets/processed/LFW_subset_rwmfd/
+# manifests are small, deterministic, and worth tracking - they're the
+# actual provenance record for which images/identities were used.
+
+datasets/masking/masktheface/dlib_models/
+
+embeddings/embeddings.npz
+embeddings/chroma/
+evaluation/results.json
+evaluation/multi_template_results.json
+
+enrollment/enrollment_embeddings.npz
+enrollment/chroma_data/
+# enrollment_manifest.csv is kept, same policy as the other manifests above

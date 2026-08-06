@@ -1,5 +1,15 @@
 # ARGUS --- Detailed Design
 
+> **This is the early design doc, written before the backend existed.** The
+> core idea below (masked-variant templates alongside the unmasked one) is
+> what got built, but the API surface drifted during implementation: this
+> doc's `/api/v1/identities` + audit/reports endpoints were superseded by a
+> `students` / `classrooms` / `class_sessions` attendance domain model. For
+> the actual implemented API, schema, and endpoints, see `docs/db.md`,
+> `docs/api_integration.md`, `docs/database_setup.md`, and `backend/README.md`
+> instead - this file is kept for the reasoning behind the original approach,
+> not as a current reference.
+
 ## What we are building
 
 ARGUS recognizes a masked person from an enrollment photograph taken
