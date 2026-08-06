@@ -7,6 +7,7 @@ import numpy as np
 from app.recognition.adapters import scrfd_decode
 
 
+# checks the higher-scoring of two overlapping boxes survives, the lower one is suppressed
 def test_nms_keeps_highest_score_when_boxes_overlap() -> None:
     boxes = np.array([[0, 0, 10, 10], [1, 1, 11, 11], [50, 50, 60, 60]], dtype=np.float32)
     scores = np.array([0.9, 0.95, 0.5], dtype=np.float32)
@@ -14,6 +15,7 @@ def test_nms_keeps_highest_score_when_boxes_overlap() -> None:
     assert kept == [1, 2]  # box 1 (higher score) suppresses overlapping box 0
 
 
+# checks two boxes with no overlap both survive suppression independently
 def test_nms_keeps_non_overlapping_boxes_separately() -> None:
     boxes = np.array([[0, 0, 10, 10], [50, 50, 60, 60]], dtype=np.float32)
     scores = np.array([0.9, 0.8], dtype=np.float32)
@@ -21,6 +23,7 @@ def test_nms_keeps_non_overlapping_boxes_separately() -> None:
     assert sorted(kept) == [0, 1]
 
 
+# checks kept indices come back ordered highest-score-first, not in their original input order
 def test_nms_returns_indices_in_descending_score_order() -> None:
     boxes = np.array([[0, 0, 10, 10], [20, 20, 30, 30], [40, 40, 50, 50]], dtype=np.float32)
     scores = np.array([0.3, 0.9, 0.6], dtype=np.float32)
@@ -39,6 +42,7 @@ def empty_level_outputs(
     return scores, boxes, keypoints
 
 
+# checks an all-zero-score output (no detections) decodes to correctly-shaped empty arrays
 def test_decode_returns_empty_when_no_score_clears_the_threshold() -> None:
     height, width = 32, 32
     outputs = [empty_level_outputs(height, width, stride)[0] for stride in scrfd_decode.STRIDES]
@@ -51,6 +55,7 @@ def test_decode_returns_empty_when_no_score_clears_the_threshold() -> None:
     assert landmarks.shape == (0, 5, 2)
 
 
+# checks one anchor's raw distance outputs decode into the correct absolute pixel box, hand-verified
 def test_decode_converts_one_anchor_s_distances_into_an_absolute_box() -> None:
     height, width, stride = 32, 32, 8
     # anchor 0 sits at grid cell (0, 0) for this shape/stride, so its centre is pixel (0, 0)

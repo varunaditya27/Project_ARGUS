@@ -28,6 +28,7 @@ def test_unknown_variant_names_are_silently_dropped() -> None:
     assert set(variants) == {"surgical_blue"}
 
 
+# checks status() reports configured=False and names the unrecognized variant
 def test_status_reports_unknown_variant_names() -> None:
     synth = GeometricMaskSynthesizer(["not_a_real_mask"])
     status = synth.status()
@@ -35,6 +36,7 @@ def test_status_reports_unknown_variant_names() -> None:
     assert "not_a_real_mask" in status.detail
 
 
+# checks the same face renders byte-identical output twice, since fabric grain uses a seeded RNG
 def test_synthesize_is_deterministic_for_the_same_input() -> None:
     synth = GeometricMaskSynthesizer(["cloth_black"])
     face = aligned_face()
@@ -43,6 +45,7 @@ def test_synthesize_is_deterministic_for_the_same_input() -> None:
     np.testing.assert_array_equal(first, second)
 
 
+# checks the mask leaves the eyes/forehead untouched but always covers the bottom of the face
 def test_mask_covers_lower_face_and_leaves_top_rows_untouched() -> None:
     synth = GeometricMaskSynthesizer(["surgical_blue"])
     face = aligned_face()
@@ -53,6 +56,7 @@ def test_mask_covers_lower_face_and_leaves_top_rows_untouched() -> None:
     assert not np.array_equal(result[-1], face[-1])
 
 
+# checks every style in MASK_STYLES actually renders, not just the ones covered by other tests
 def test_every_configured_style_renders_without_crashing() -> None:
     synth = GeometricMaskSynthesizer(list(MASK_STYLES))
     variants = synth.synthesize(aligned_face())
