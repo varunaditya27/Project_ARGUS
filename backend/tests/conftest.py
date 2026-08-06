@@ -1,35 +1,49 @@
-"""Shared fixtures.
+"""Shared fixtures and the guards that decide which suites can run here.
 
-The PostgreSQL-backed fixtures only run when ``ARGUS_TEST_DATABASE_URL`` points
-at a throwaway database; every table is dropped and recreated per test.
+Three tiers live under this directory. ``unit`` needs nothing. ``integration``
+needs PostgreSQL (``ARGUS_TEST_DATABASE_URL``) and, for the storage cases, a
+temporary directory. ``acceptance`` additionally needs the ONNX pack and a
+Chroma store, and skips with a named reason when either is absent, so a machine
+without the models still reports honestly instead of silently passing.
 """
 
 from __future__ import annotations
 
-import datetime as dt
 import os
 from collections.abc import AsyncIterator
+from pathlib import Path
 
 import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
+from sqlalchemy.ext.asyncio import create_async_engine
 
 from app.container import Container, build_container
 from app.core.config import Settings
 from app.db.models import Base
 from app.main import create_app
-from app.schemas.classroom import ClassroomCreate
-from app.schemas.session import SessionCreate
-from app.schemas.student import StudentCreate
 
 TEST_DATABASE_URL = os.getenv("ARGUS_TEST_DATABASE_URL")
+
+FIXTURES = Path(__file__).parent / "fixtures"
+#: Public LFW portrait, the only face image the repository ships.
+SAMPLE_FACE = FIXTURES / "sample_face.jpg"
+
+#: Where the InsightFace buffalo_l pack lives; the repository root by default.
+MODEL_ROOT = Path(
+    os.getenv("ARGUS_TEST_MODEL_ROOT", Path(__file__).parents[2] / "models" / "buffalo_l")
+)
+DETECTOR = MODEL_ROOT / "det_10g.onnx"
+EMBEDDER = MODEL_ROOT / "w600k_r50.onnx"
 
 requires_database = pytest.mark.skipif(
     not TEST_DATABASE_URL,
     reason="set ARGUS_TEST_DATABASE_URL to run the PostgreSQL integration tests",
 )
-
-T0 = dt.datetime(2026, 8, 6, 9, 0, 0)
+requires_models = pytest.mark.skipif(
+    not (DETECTOR.exists() and EMBEDDER.exists()),
+    reason=f"no ONNX pack under {MODEL_ROOT}; see backend/README.md",
+)
 
 
 def make_settings(**overrides: object) -> Settings:
@@ -61,6 +75,17 @@ def make_client(settings: Settings) -> AsyncClient:
     )
 
 
+async def reset_database(url: str) -> None:
+    # Drop and recreate every table so a test starts from an empty database.
+    engine = create_async_engine(url)
+    try:
+        async with engine.begin() as connection:
+            await connection.run_sync(Base.metadata.drop_all)
+            await connection.run_sync(Base.metadata.create_all)
+    finally:
+        await engine.dispose()
+
+
 @pytest.fixture
 def settings() -> Settings:
     return make_settings()
@@ -89,42 +114,25 @@ async def client_unreachable_db() -> AsyncIterator[AsyncClient]:
 @pytest_asyncio.fixture
 async def db_container() -> AsyncIterator[Container]:
     # Fully wired application against an empty test database.
+    assert TEST_DATABASE_URL
+    await reset_database(TEST_DATABASE_URL)
     container = build_container(make_settings(database_url=TEST_DATABASE_URL))
-    assert container.database is not None
-    async with container.database.engine.begin() as connection:
-        await connection.run_sync(Base.metadata.drop_all)
-        await connection.run_sync(Base.metadata.create_all)
     try:
         yield container
     finally:
         await container.shutdown()
 
 
-async def seed(container: Container, *, students: int = 3):
-    # A classroom, a roster and one ACTIVE session.
-    services = container.services
-    classroom = await services.classrooms.create(
-        ClassroomCreate(class_name="CSE-A", department="CSE", semester=5, strength=students)
+@pytest_asyncio.fixture
+async def db_client(tmp_path: Path) -> AsyncIterator[AsyncClient]:
+    # HTTP client over an empty test database, with images written to tmp_path.
+    assert TEST_DATABASE_URL
+    await reset_database(TEST_DATABASE_URL)
+    settings = make_settings(
+        database_url=TEST_DATABASE_URL,
+        object_storage_mode="local",
+        local_storage_path=tmp_path / "media",
+        local_public_base_url="http://testserver/media",
     )
-    roster = [
-        await services.students.create(
-            StudentCreate(
-                student_name=f"Student {index}",
-                roll_no=index,
-                class_id=classroom.class_id,
-                image_url=f"https://r2.example.com/enrollment/{index}.jpg",
-            )
-        )
-        for index in range(1, students + 1)
-    ]
-    session = await services.sessions.create(
-        SessionCreate(
-            class_id=classroom.class_id,
-            subject="Computer Vision",
-            faculty="Dr. Placeholder",
-            date=dt.date(2026, 8, 6),
-            start_time=dt.time(9, 0),
-            end_time=dt.time(10, 0),
-        )
-    )
-    return classroom, roster, session
+    async with make_client(settings) as http_client:
+        yield http_client

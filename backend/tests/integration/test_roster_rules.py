@@ -15,7 +15,8 @@ from app.domain import Observation, SessionStatus
 from app.schemas.classroom import ClassroomCreate
 from app.schemas.session import SessionCreate
 from app.schemas.student import StudentCreate
-from tests.conftest import T0, requires_database, seed
+from tests.conftest import requires_database
+from tests.helpers import T0, seed
 
 pytestmark = [pytest.mark.database, requires_database]
 

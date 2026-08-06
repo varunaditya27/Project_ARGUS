@@ -32,10 +32,15 @@ Open http://localhost:8000/docs. Without `ARGUS_DATABASE_URL` the service still
 starts, and every database endpoint answers `503` naming the missing variable.
 
 ```bash
-pytest                                              # unit tests
+pytest tests/unit                                   # no services required
 ARGUS_TEST_DATABASE_URL=postgresql+asyncpg://argus:argus@localhost:5432/argus_test pytest
 ruff check . && ruff format --check .
 ```
+
+The suite has three tiers: `tests/unit` needs nothing, `tests/integration`
+needs PostgreSQL, and `tests/acceptance` drives the whole system over HTTP and
+additionally needs Chroma and the ONNX pack. A tier that cannot run skips with
+a named reason. Every case is listed in `docs/testplan.md`.
 
 ---
 
@@ -98,6 +103,9 @@ backend/
 ├── alembic/                    0001_initial_schema = docs/db.md
 ├── benchmarks/                 db_scale.py, vector_search.py
 └── tests/
+    ├── unit/                   pure logic, no I/O
+    ├── integration/            PostgreSQL, the ASGI app, the filesystem
+    └── acceptance/             the whole system over HTTP, real models
 ```
 
 Layering is one-directional: `api -> services -> repositories -> db`, with

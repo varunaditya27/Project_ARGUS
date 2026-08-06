@@ -83,7 +83,7 @@ alembic upgrade head
 ```
 
 Revision `0001_initial_schema` creates exactly the four tables from `docs/db.md`.
-A test (`tests/test_migration_matches_models.py`) applies the migration to a
+A test (`tests/integration/test_migration_matches_models.py`) applies the migration to a
 scratch database and asserts Alembic finds **no** difference against the ORM
 models, so the migration and the code can never drift apart.
 

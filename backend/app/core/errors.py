@@ -68,6 +68,18 @@ def error_body(code: str, message: str, details: dict[str, Any] | None = None) -
     return {"error": {"code": code, "message": message, "details": details or {}}}
 
 
+def _serialisable(value: Any) -> Any:
+    # A model validator that raises ValueError leaves the exception object in
+    # ctx, which json.dumps cannot encode; keep the text, drop the object.
+    if isinstance(value, dict):
+        return {key: _serialisable(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_serialisable(item) for item in value]
+    if isinstance(value, (str, int, float, bool)) or value is None:
+        return value
+    return str(value)
+
+
 def register_exception_handlers(app: FastAPI) -> None:
     # Map every failure class onto the error envelope.
     @app.exception_handler(ArgusError)
@@ -84,7 +96,9 @@ def register_exception_handlers(app: FastAPI) -> None:
         return JSONResponse(
             status_code=422,
             content=error_body(
-                "invalid_request", "Request payload failed validation.", {"errors": exc.errors()}
+                "invalid_request",
+                "Request payload failed validation.",
+                {"errors": _serialisable(exc.errors())},
             ),
         )
 

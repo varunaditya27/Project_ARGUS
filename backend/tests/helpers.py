@@ -1,19 +1,26 @@
-"""Builders and test doubles shared by the roster import tests."""
+"""Builders, seeds and test doubles shared across the suites."""
 
 from __future__ import annotations
 
+import datetime as dt
 import hashlib
 import io
 import uuid
 import zipfile
 from collections.abc import Mapping, Sequence
 
+from app.container import Container
 from app.core.archives import SafeZipArchive
+from app.schemas.classroom import ClassroomCreate
 from app.schemas.registration import ImportRowError
+from app.schemas.session import SessionCreate
+from app.schemas.student import StudentCreate
 from app.services.roster_import import RosterImportService
 from app.storage.ports import ObjectStorage, StoredObject, sniff_image_type
 
 CLASS_ID = uuid.UUID("11111111-1111-1111-1111-111111111111")
+#: Fixed clock for attendance assertions.
+T0 = dt.datetime(2026, 8, 6, 9, 0, 0)
 #: Only the magic bytes matter: the import path identifies images without OpenCV.
 PNG = b"\x89PNG\r\n\x1a\n" + b"\x00" * 32
 JPEG = b"\xff\xd8\xff\xe0" + b"\x00" * 32
@@ -49,6 +56,36 @@ def roster_csv(
 def reasons(errors: Sequence[ImportRowError]) -> dict[int, str]:
     # Row number to failure reason.
     return {error.row: error.reason for error in errors}
+
+
+async def seed(container: Container, *, students: int = 3):
+    # A classroom, a roster and one ACTIVE session.
+    services = container.services
+    classroom = await services.classrooms.create(
+        ClassroomCreate(class_name="CSE-A", department="CSE", semester=5, strength=students)
+    )
+    roster = [
+        await services.students.create(
+            StudentCreate(
+                student_name=f"Student {index}",
+                roll_no=index,
+                class_id=classroom.class_id,
+                image_url=f"https://r2.example.com/enrollment/{index}.jpg",
+            )
+        )
+        for index in range(1, students + 1)
+    ]
+    session = await services.sessions.create(
+        SessionCreate(
+            class_id=classroom.class_id,
+            subject="Computer Vision",
+            faculty="Dr. Placeholder",
+            date=dt.date(2026, 8, 6),
+            start_time=dt.time(9, 0),
+            end_time=dt.time(10, 0),
+        )
+    )
+    return classroom, roster, session
 
 
 class RecordingStorage:

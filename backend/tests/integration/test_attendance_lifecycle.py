@@ -3,7 +3,7 @@
 Run with::
 
     $env:ARGUS_TEST_DATABASE_URL = "postgresql+asyncpg://argus:argus@localhost:5432/argus_test"
-    pytest tests/test_attendance_lifecycle.py
+    pytest tests/integration
 """
 
 from __future__ import annotations
@@ -17,7 +17,8 @@ from app.container import Container
 from app.core.errors import ConflictError, NotFoundError
 from app.domain import AttendanceStatus, Observation, SessionStatus
 from app.schemas.student import StudentCreate
-from tests.conftest import T0, requires_database, seed
+from tests.conftest import requires_database
+from tests.helpers import T0, seed
 
 pytestmark = [pytest.mark.database, requires_database]
 
